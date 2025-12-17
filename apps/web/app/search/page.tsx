@@ -1,23 +1,41 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search as SearchIcon,
   Filter,
-  SortAsc,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  User,
+  BookOpen,
 } from 'lucide-react'
 import { api, SearchResult } from '@/lib/api'
 import { cn, formatNumber, truncate } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
+import { SearchIllustration, EmptyDataIllustration } from '@/components/icons/illustrations'
 
 export default function SearchPage() {
-  const [query, setQuery] = useState('')
+  const searchParams = useSearchParams()
+  const initialQuery = searchParams.get('q') || ''
+  
+  const [query, setQuery] = useState(initialQuery)
   const [page, setPage] = useState(1)
+  
+  // Sync query state with URL params
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q && q !== query) {
+      setQuery(q)
+      setPage(1)
+    }
+  }, [searchParams])
   const [sortBy, setSortBy] = useState('relevance')
   const [yearFrom, setYearFrom] = useState<number | undefined>()
   const [yearTo, setYearTo] = useState<number | undefined>()
@@ -203,7 +221,7 @@ export default function SearchPage() {
           {/* No Results */}
           {data?.results.length === 0 && (
             <Card className="p-12 text-center">
-              <SearchIcon className="mx-auto h-12 w-12 text-neutral-300" />
+              <EmptyDataIllustration className="mx-auto" />
               <h3 className="mt-4 text-lg font-medium text-neutral-900">
                 No results found
               </h3>
@@ -218,12 +236,12 @@ export default function SearchPage() {
       {/* Empty State */}
       {query.length === 0 && (
         <Card className="p-12 text-center">
-          <SearchIcon className="mx-auto h-12 w-12 text-neutral-300" />
+          <SearchIllustration className="mx-auto" />
           <h3 className="mt-4 text-lg font-medium text-neutral-900">
-            Start searching
+            Search Research Papers
           </h3>
-          <p className="mt-2 text-neutral-500">
-            Enter keywords to find research papers
+          <p className="mt-2 text-neutral-500 max-w-md mx-auto">
+            Enter keywords, paper titles, or author names to discover research across arXiv, PubMed, and OpenAlex.
           </p>
         </Card>
       )}
@@ -232,72 +250,193 @@ export default function SearchPage() {
 }
 
 function SearchResultCard({ result }: { result: SearchResult }) {
+  const [expanded, setExpanded] = useState(false)
+  
   const sourceColors: Record<string, string> = {
     arxiv: 'bg-red-100 text-red-700',
     pubmed: 'bg-blue-100 text-blue-700',
     openalex: 'bg-orange-100 text-orange-700',
   }
 
+  // Generate external link based on source
+  const getExternalLink = () => {
+    if (result.doi) return `https://doi.org/${result.doi}`
+    if (result.source === 'arxiv' && result.work_id.includes('arxiv:')) {
+      const arxivId = result.work_id.replace('arxiv:', '')
+      return `https://arxiv.org/abs/${arxivId}`
+    }
+    if (result.source === 'pubmed' && result.work_id.includes('pmid:')) {
+      const pmid = result.work_id.replace('pmid:', '')
+      return `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`
+    }
+    return null
+  }
+
+  const externalLink = getExternalLink()
+
   return (
-    <Card className="group p-6 transition-all hover:border-primary-200 hover:shadow-soft-lg">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            {result.source && (
-              <span
-                className={cn(
-                  'rounded-full px-2 py-0.5 text-xs font-medium',
-                  sourceColors[result.source] || 'bg-neutral-100 text-neutral-700'
-                )}
-              >
-                {result.source}
-              </span>
+    <Card className="group overflow-hidden transition-all hover:border-primary-200 hover:shadow-soft-lg">
+      <div className="p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {result.source && (
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-xs font-medium',
+                    sourceColors[result.source] || 'bg-neutral-100 text-neutral-700'
+                  )}
+                >
+                  {result.source}
+                </span>
+              )}
+              {result.year && (
+                <span className="text-xs text-neutral-400">{result.year}</span>
+              )}
+              {result.venue_name && (
+                <span className="text-xs text-neutral-400 truncate max-w-[200px]">
+                  {result.venue_name}
+                </span>
+              )}
+            </div>
+
+            <h3 className="mt-2 font-semibold text-neutral-900 group-hover:text-primary-700">
+              {result.title}
+            </h3>
+
+            {/* Authors */}
+            {result.authors && result.authors.length > 0 && (
+              <div className="mt-2 flex items-center gap-1 text-sm text-neutral-500">
+                <User className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  {result.authors.slice(0, 3).join(', ')}
+                  {result.authors.length > 3 && ` +${result.authors.length - 3} more`}
+                </span>
+              </div>
             )}
-            {result.year && (
-              <span className="text-xs text-neutral-400">{result.year}</span>
+
+            {/* Brief abstract preview */}
+            {result.abstract && !expanded && (
+              <p className="mt-2 text-sm text-neutral-600 line-clamp-2">
+                {truncate(result.abstract, 200)}
+              </p>
             )}
+
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+              {result.primary_field && (
+                <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
+                  {result.primary_field}
+                </span>
+              )}
+              {result.citation_count !== undefined && result.citation_count > 0 && (
+                <span className="text-neutral-500">
+                  {formatNumber(result.citation_count)} citations
+                </span>
+              )}
+              {result.pagerank !== undefined && result.pagerank > 0 && (
+                <span className="text-neutral-500">
+                  PR: {result.pagerank.toFixed(3)}
+                </span>
+              )}
+            </div>
           </div>
 
-          <h3 className="mt-2 font-semibold text-neutral-900 group-hover:text-primary-700">
-            {result.title}
-          </h3>
-
-          {result.abstract && (
-            <p className="mt-2 text-sm text-neutral-600 line-clamp-2">
-              {truncate(result.abstract, 300)}
-            </p>
-          )}
-
-          <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-            {result.primary_field && (
-              <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
-                {result.primary_field}
-              </span>
+          <div className="flex flex-col gap-2">
+            {externalLink ? (
+              <a
+                href={externalLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-400 transition-all hover:border-primary-300 hover:text-primary-600"
+                title="View paper"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : (
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-300 cursor-not-allowed"
+                title="External link not available"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </div>
             )}
-            {result.citation_count !== undefined && result.citation_count > 0 && (
-              <span className="text-neutral-500">
-                {formatNumber(result.citation_count)} citations
-              </span>
-            )}
-            {result.pagerank !== undefined && result.pagerank > 0 && (
-              <span className="text-neutral-500">
-                Influence: {result.pagerank.toFixed(4)}
-              </span>
-            )}
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-400 transition-all hover:border-primary-300 hover:text-primary-600"
+              title={expanded ? 'Show less' : 'Show more'}
+            >
+              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
           </div>
         </div>
-
-        {result.doi && (
-          <a
-            href={`https://doi.org/${result.doi}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-400 opacity-0 transition-all group-hover:opacity-100 hover:border-primary-300 hover:text-primary-600"
-          >
-            <ExternalLink className="h-4 w-4" />
-          </a>
-        )}
       </div>
+
+      {/* Expanded details panel */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border-t border-neutral-100 bg-neutral-50"
+          >
+            <div className="p-6 space-y-4">
+              {/* Full abstract */}
+              {result.abstract && (
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
+                    <FileText className="h-4 w-4" />
+                    Abstract
+                  </div>
+                  <p className="text-sm text-neutral-600 leading-relaxed">
+                    {result.abstract}
+                  </p>
+                </div>
+              )}
+
+              {/* All authors */}
+              {result.authors && result.authors.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
+                    <User className="h-4 w-4" />
+                    Authors
+                  </div>
+                  <p className="text-sm text-neutral-600">
+                    {result.authors.join(', ')}
+                  </p>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                {externalLink ? (
+                  <a
+                    href={externalLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    Read Paper
+                  </a>
+                ) : (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-neutral-200 px-4 py-2 text-sm font-medium text-neutral-500 cursor-not-allowed">
+                    <BookOpen className="h-4 w-4" />
+                    Link Not Available
+                  </div>
+                )}
+                <a
+                  href={`/graph?work_id=${result.work_id}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+                >
+                  Explore Citations
+                </a>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Card>
   )
 }

@@ -18,13 +18,75 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from pyspark.ml.feature import (
-    Tokenizer, StopWordsRemover, CountVectorizer, IDF
+    Tokenizer, StopWordsRemover, CountVectorizer, IDF, NGram, RegexTokenizer
 )
 from pyspark.ml.clustering import LDA
 from pyspark.ml import Pipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Scientific filler words to exclude from topic labels
+# This comprehensive list prevents generic/nonsense topic labels like "Identified"
+SCIENTIFIC_STOPWORDS = {
+    # Generic research terms - MUST filter these
+    'study', 'studies', 'research', 'paper', 'papers', 'method', 'methods', 
+    'results', 'result', 'analysis', 'approach', 'approaches', 'model', 'models',
+    'data', 'dataset', 'datasets', 'performance', 'experiments', 'experiment',
+    'proposed', 'using', 'based', 'show', 'shows', 'shown', 'demonstrate',
+    'demonstrates', 'present', 'presents', 'presented', 'work', 'works',
+    'previous', 'existing', 'framework', 'technique', 'techniques',
+    
+    # CRITICAL: Generic verbs that often become topic labels incorrectly
+    'identified', 'identify', 'identifying', 'evaluate', 'evaluated', 'evaluating',
+    'achieved', 'achieve', 'achieving', 'developed', 'develop', 'developing',
+    'obtained', 'obtain', 'obtaining', 'observed', 'observe', 'observing',
+    'performed', 'perform', 'performing', 'conducted', 'conduct', 'conducting',
+    'reported', 'report', 'reporting', 'measured', 'measure', 'measuring',
+    'compared', 'compare', 'comparing', 'analyzed', 'analyze', 'analyzing',
+    'examined', 'examine', 'examining', 'investigated', 'investigate', 'investigating',
+    'assessed', 'assess', 'assessing', 'determined', 'determine', 'determining',
+    'applied', 'apply', 'applying', 'considered', 'consider', 'considering',
+    
+    # Medical/bio filler
+    'patients', 'patient', 'treatment', 'treatments', 'clinical', 'health',
+    'disease', 'diseases', 'therapy', 'diagnosis', 'outcomes', 'outcome',
+    'effect', 'effects', 'risk', 'factors', 'factor', 'associated',
+    'significantly', 'group', 'groups', 'sample', 'samples', 'subjects',
+    
+    # Common verbs/adjectives
+    'new', 'novel', 'improved', 'better', 'high', 'low', 'different',
+    'various', 'several', 'many', 'use', 'used', 'provide', 'provides',
+    'compared', 'however', 'also', 'well', 'findings', 'able',
+    'important', 'significant', 'recent', 'current', 'state', 'art',
+    
+    # Numbers and units
+    'one', 'two', 'three', 'first', 'second', 'third', 'may', 'can',
+    'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    
+    # Additional generic terms
+    'problem', 'problems', 'task', 'tasks', 'system', 'systems', 'process',
+    'processes', 'application', 'applications', 'information', 'level',
+    'number', 'time', 'set', 'case', 'cases', 'example', 'examples',
+    'feature', 'features', 'input', 'output', 'value', 'values',
+    'type', 'types', 'form', 'forms', 'part', 'parts', 'order', 'area',
+    'point', 'points', 'way', 'ways', 'step', 'steps', 'stage', 'stages',
+    
+    # AI/ML generic (keep specific terms like "transformer", "attention", "convolution")
+    'learning', 'training', 'testing', 'network', 'networks', 'layer',
+    'layers', 'algorithm', 'algorithms', 'accuracy', 'error', 'loss',
+    'function', 'functions', 'parameter', 'parameters', 'weight', 'weights',
+    'optimization', 'optimize', 'optimized', 'train', 'trained', 'test', 'tested',
+    
+    # More generic scientific terms
+    'context', 'contexts', 'condition', 'conditions', 'strategy', 'strategies',
+    'mechanism', 'mechanisms', 'structure', 'structures', 'property', 'properties',
+    'quality', 'quantity', 'rate', 'rates', 'degree', 'degrees', 'ratio', 'ratios',
+    'component', 'components', 'element', 'elements', 'source', 'sources',
+    'target', 'targets', 'object', 'objects', 'class', 'classes', 'category',
+    'measure', 'measures', 'metric', 'metrics', 'score', 'scores',
+    'baseline', 'baselines', 'benchmark', 'benchmarks', 'standard', 'standards',
+}
 
 
 def create_spark_session(config: Dict[str, Any]) -> SparkSession:
@@ -90,13 +152,41 @@ def run_topic_modeling(
         num_topics = max(5, doc_count // 20)
         logger.info(f"Reduced to {num_topics} topics")
     
-    # Text preprocessing pipeline
-    tokenizer = Tokenizer(inputCol="abstract", outputCol="words")
+    # Text preprocessing pipeline with bigrams
+    # Use RegexTokenizer to handle punctuation better
+    tokenizer = RegexTokenizer(
+        inputCol="abstract", 
+        outputCol="words",
+        pattern="\\W+",  # Split on non-word characters
+        minTokenLength=3  # Ignore short tokens
+    )
     
     # Remove stopwords
     remover = StopWordsRemover(inputCol="words", outputCol="filtered_words")
     
-    # Count vectorizer (TF)
+    # Generate bigrams for phrase detection
+    bigram = NGram(n=2, inputCol="filtered_words", outputCol="bigrams")
+    
+    # Count vectorizer for unigrams
+    cv_unigram = CountVectorizer(
+        inputCol="filtered_words",
+        outputCol="tf_unigram",
+        vocabSize=vocab_size // 2,
+        minDF=min_doc_freq,
+        maxDF=max_doc_freq_ratio
+    )
+    
+    # Count vectorizer for bigrams  
+    cv_bigram = CountVectorizer(
+        inputCol="bigrams",
+        outputCol="tf_bigram",
+        vocabSize=vocab_size // 2,
+        minDF=max(3, min_doc_freq // 2),  # Bigrams need fewer occurrences
+        maxDF=max_doc_freq_ratio
+    )
+    
+    # We'll use unigrams for simplicity (bigrams add complexity)
+    # but filter better with expanded stopwords
     cv = CountVectorizer(
         inputCol="filtered_words",
         outputCol="tf",
@@ -131,15 +221,26 @@ def run_topic_modeling(
     # Extract topic-term distributions
     topics_matrix = lda_model.describeTopics(maxTermsPerTopic=15)
     
-    # Convert to readable format
+    # Convert to readable format with filler word filtering
     def get_topic_terms(term_indices, term_weights):
         terms = []
         for idx, weight in zip(term_indices, term_weights):
             if idx < len(vocabulary):
-                terms.append({
-                    "term": vocabulary[idx],
-                    "weight": float(weight)
-                })
+                term = vocabulary[idx].lower()
+                # Skip scientific filler words and short terms
+                if term not in SCIENTIFIC_STOPWORDS and len(term) > 3:
+                    terms.append({
+                        "term": vocabulary[idx],
+                        "weight": float(weight)
+                    })
+        # Return at least some terms even if all filtered
+        if not terms and term_indices:
+            for idx, weight in zip(term_indices[:3], term_weights[:3]):
+                if idx < len(vocabulary):
+                    terms.append({
+                        "term": vocabulary[idx],
+                        "weight": float(weight)
+                    })
         return terms
     
     from pyspark.sql.types import ArrayType, StructType, StructField, StringType, FloatType
@@ -155,8 +256,13 @@ def run_topic_modeling(
         F.col("topic").alias("topic_id"),
         get_terms_udf(F.col("termIndices"), F.col("termWeights")).alias("top_terms")
     ).withColumn(
+        # Use first term as label (already filtered by get_topic_terms)
+        # Single term is cleaner for display
         "label",
-        F.element_at(F.col("top_terms.term"), 1)  # First term as label
+        F.coalesce(
+            F.initcap(F.element_at(F.col("top_terms.term"), 1)),
+            F.lit("Unknown Topic")
+        )
     )
     
     # Get document-topic distributions
@@ -312,6 +418,21 @@ def run_graph_analytics(
 # TREND ANALYSIS
 # =============================================================================
 
+# Labels that are too generic for meaningful emerging topics
+# These should match SCIENTIFIC_STOPWORDS for consistency
+GENERIC_TOPIC_LABELS = {
+    'patients', 'patient', 'sample', 'samples', 'data', 'model', 'models',
+    'method', 'methods', 'study', 'studies', 'results', 'analysis', 'group',
+    'groups', 'effect', 'effects', 'level', 'levels', 'approach', 'system',
+    'systems', 'performance', 'time', 'rate', 'risk', 'treatment', 'clinical',
+    # CRITICAL: Add all generic verbs that wrongly become topic labels
+    'identified', 'identify', 'using', 'based', 'proposed', 'developed',
+    'evaluated', 'achieved', 'obtained', 'performed', 'observed', 'measured',
+    'conducted', 'compared', 'analyzed', 'examined', 'investigated', 'determined',
+    'applied', 'demonstrate', 'demonstrated', 'present', 'presented', 'show',
+    'network', 'networks', 'learning', 'training', 'algorithm', 'algorithms',
+}
+
 def run_trend_analysis(
     spark: SparkSession,
     works_df: DataFrame,
@@ -335,8 +456,9 @@ def run_trend_analysis(
     logger.info("Running trend analysis...")
     
     granularity = trend_config.get('time_granularity', 'year')
-    min_papers = trend_config.get('min_papers_per_period', 10)
-    emerging_threshold = trend_config.get('emerging_threshold', 1.5)
+    min_papers_prev = trend_config.get('min_papers_per_period', 5)  # Min in previous period
+    min_papers_current = trend_config.get('min_papers_current', 3)  # Min in current period
+    emerging_threshold = trend_config.get('emerging_threshold', 0.3)  # 30% growth = emerging
     
     # Join topics with works
     topics_with_year = work_topics_df.select(
@@ -370,32 +492,73 @@ def run_trend_analysis(
     ).orderBy("year", "topic_id")
     
     # Calculate growth rates for emerging topics
+    # Use 2-year rolling windows for more stability
     window = Window.partitionBy("topic_id").orderBy("year")
     
-    with_prev = topic_trends_df.withColumn(
+    with_rolling = topic_trends_df.withColumn(
+        # Previous year's values
         "prev_share",
-        F.lag("topic_share").over(window)
+        F.lag("topic_share", 1).over(window)
     ).withColumn(
         "prev_count",
-        F.lag("paper_count").over(window)
+        F.lag("paper_count", 1).over(window)
+    ).withColumn(
+        # Two years ago (for smoothing)
+        "prev2_share",
+        F.lag("topic_share", 2).over(window)
+    ).withColumn(
+        "prev2_count",
+        F.lag("paper_count", 2).over(window)
     )
     
-    growth = with_prev.filter(
-        (F.col("prev_share") > 0) & (F.col("prev_count") >= min_papers)
+    # Calculate growth using smoothed baseline (avg of prev 1-2 years)
+    growth = with_rolling.withColumn(
+        "baseline_share",
+        F.coalesce(
+            (F.col("prev_share") + F.coalesce(F.col("prev2_share"), F.col("prev_share"))) / 2,
+            F.col("prev_share")
+        )
+    ).withColumn(
+        "baseline_count",
+        F.coalesce(
+            (F.col("prev_count") + F.coalesce(F.col("prev2_count"), F.col("prev_count"))) / 2,
+            F.col("prev_count")
+        )
+    ).filter(
+        # Require minimum support in BOTH periods
+        (F.col("baseline_share") > 0) & 
+        (F.col("baseline_count") >= min_papers_prev) &
+        (F.col("paper_count") >= min_papers_current)
     ).withColumn(
         "growth_rate",
-        (F.col("topic_share") - F.col("prev_share")) / F.col("prev_share")
+        (F.col("topic_share") - F.col("baseline_share")) / F.col("baseline_share")
     )
     
-    # Identify emerging topics (recent high growth)
+    # Identify emerging topics in most recent year
     max_year = topics_with_year.agg(F.max("year")).collect()[0][0]
+    
+    # Filter out generic/filler topic labels
+    generic_labels_lower = [l.lower() for l in GENERIC_TOPIC_LABELS]
     
     emerging_topics_df = growth.filter(
         (F.col("year") == max_year) & 
-        (F.col("growth_rate") > emerging_threshold)
+        (F.col("growth_rate") > emerging_threshold) &
+        # Exclude generic labels (check if first word of label is generic)
+        (~F.lower(F.split(F.col("label"), " ")[0]).isin(generic_labels_lower))
     ).select(
         "topic_id", "label", "paper_count", "topic_share", "growth_rate"
     ).orderBy(F.col("growth_rate").desc())
+    
+    # If we have no emerging topics, get the top growing topics above 0%
+    if emerging_topics_df.count() == 0:
+        logger.warning("No emerging topics above threshold, using top positive growth")
+        emerging_topics_df = growth.filter(
+            (F.col("year") == max_year) & 
+            (F.col("growth_rate") > 0) &
+            (~F.lower(F.split(F.col("label"), " ")[0]).isin(generic_labels_lower))
+        ).select(
+            "topic_id", "label", "paper_count", "topic_share", "growth_rate"
+        ).orderBy(F.col("growth_rate").desc()).limit(10)
     
     logger.info(f"Found {emerging_topics_df.count()} emerging topics")
     

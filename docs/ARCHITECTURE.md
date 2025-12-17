@@ -1,5 +1,5 @@
 # Architecture Documentation
-## Scalable Scholarly Knowledge Graph
+## ScholarGraph - Scalable Scholarly Knowledge Graph
 
 ---
 
@@ -12,7 +12,8 @@
 5. [Scalability Design](#5-scalability-design)
 6. [Deployment Architecture](#6-deployment-architecture)
 7. [API Reference](#7-api-reference)
-8. [Configuration](#8-configuration)
+8. [Frontend Architecture](#8-frontend-architecture)
+9. [Configuration](#9-configuration)
 
 ---
 
@@ -33,8 +34,8 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         INGESTION LAYER                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │Rate Limiter │  │ Checkpoint  │  │  Storage    │  │  HTTP Client│        │
-│  │(Token Bucket)│  │  Manager    │  │  Manager    │  │(Retry/Backoff│        │
+│  │Rate Limiter │  │Year-Balanced│  │  Storage    │  │  HTTP Client│        │
+│  │(Token Bucket)│  │  Sampling   │  │  Manager    │  │(Retry/Backoff│       │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
 └────────────────────────────────┬────────────────────────────────────────────┘
                                  │
@@ -83,10 +84,10 @@
                                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                       PRESENTATION LAYER (Next.js)                           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-│  │   Home   │ │  Search  │ │  Topics  │ │ Rankings │ │  Graph   │          │
-│  │Dashboard │ │   Page   │ │  Trends  │ │   Page   │ │ Explorer │          │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────┐ │
+│  │   Home   │ │  Search  │ │  Topics  │ │ Rankings │ │  Graph   │ │Profile│ │
+│  │Dashboard │ │   Page   │ │  Trends  │ │   Page   │ │ Explorer │ │ Saved │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -103,35 +104,37 @@
 | Backend | FastAPI | 0.100+ | REST API |
 | Frontend | Next.js | 14.x | React framework |
 | UI | Tailwind CSS | 3.x | Styling |
-| Charts | Nivo | 0.83+ | Visualizations |
+| Charts | Nivo + D3 | 0.83+ | Visualizations |
+| Animations | Framer Motion | 10.x | UI animations |
 | Orchestration | Docker Compose | 2.x | Container management |
 
 ---
 
 ## 2. Data Flow
 
-### 2.1 Ingestion Flow
+### 2.1 Ingestion Flow (Year-Balanced)
 
 ```
-1. FETCH
-   API Request → Rate Limiter → HTTP Client → Response
+1. CONFIGURE YEAR BINS
+   Config → Year Ranges (2015-2017, 2018-2020, 2021-2022, 2023-2024)
                      ↓
-   [Token Bucket: respects API rate limits]
+   [Ensures balanced distribution across time periods]
 
-2. PARSE
+2. FETCH PER BIN
+   For each year bin:
+     API Request → Rate Limiter → HTTP Client → Response
+                       ↓
+     [Fetches targeted records per bin]
+
+3. PARSE
    Response → Parser (XML/JSON) → Structured Records
                      ↓
    [arXiv: XML, PubMed: XML, OpenAlex: JSON]
 
-3. STORE
+4. STORE
    Records → Storage Manager → NDJSON + Metadata → HDFS
                      ↓
    [Partitioned: source/ingest_date=YYYY-MM-DD/batch_*.ndjson.gz]
-
-4. CHECKPOINT
-   Progress → Checkpoint Manager → JSON file
-                     ↓
-   [Enables resume on failure]
 ```
 
 ### 2.2 ETL Flow
@@ -169,12 +172,12 @@
 1. TOPIC MODELING
    abstracts → TF-IDF → LDA → topics + work_topics
                      ↓
-   [Distributed across Spark workers]
+   [80+ scientific stopwords filtered]
 
 2. GRAPH CONSTRUCTION
    works → vertices, citations → edges → GraphFrame
                      ↓
-   [In-memory graph representation]
+   [Filtered to valid edges only]
 
 3. PAGERANK
    GraphFrame → pagerank() → influence scores
@@ -190,11 +193,6 @@
    work_topics + years → aggregations → trends + emerging
                      ↓
    [Window functions for growth rate]
-
-6. WRITE OUTPUTS
-   All results → Parquet + Aggregates
-                     ↓
-   [Pre-computed for fast serving]
 ```
 
 ---
@@ -203,63 +201,47 @@
 
 ### 3.1 Ingestion Components
 
+#### Year-Balanced Fetcher
+```python
+def _get_year_ranges(self):
+    """Generate year bins for balanced fetching."""
+    return [
+        (2015, 2017),  # Older papers
+        (2018, 2020),  # Mid-range
+        (2021, 2022),  # Recent
+        (2023, 2024),  # Latest
+    ]
+```
+
 #### Rate Limiter (`rate_limiter.py`)
 ```python
 class RateLimiter:
     """Token bucket algorithm for API rate limiting."""
-    
-    def __init__(self, requests_per_second: float, burst_size: int = 1):
-        self.rps = requests_per_second
-        self.tokens = burst_size
-        self.last_update = time.monotonic()
-    
     async def acquire(self) -> float:
-        """Wait for and consume a token. Returns wait time."""
-        # Token replenishment + consumption logic
+        """Wait for and consume a token."""
 ```
 
-#### Checkpoint Manager (`checkpoint.py`)
+### 3.2 Spark Analytics
+
+#### Topic Modeling with Improved Stopwords
 ```python
-class CheckpointManager:
-    """Persistent state for resumable ingestion."""
-    
-    def save_checkpoint(self, source, cursor, records_processed, metadata):
-        """Atomically save progress to JSON file."""
-    
-    def get_progress(self, source) -> tuple[int, str]:
-        """Get (records_processed, cursor) for resume."""
+SCIENTIFIC_STOPWORDS = {
+    'identified', 'using', 'method', 'results', 'study', 'paper',
+    'approach', 'based', 'novel', 'proposed', 'demonstrate', 'evaluate',
+    'analysis', 'framework', 'performance', 'data', 'model', 'models',
+    # ... 80+ total terms
+}
 ```
 
-#### Storage Manager (`storage.py`)
-```python
-class StorageManager:
-    """NDJSON storage with partitioning."""
-    
-    def write_records(self, source, records, batch_id):
-        """Write records to partitioned NDJSON (gzipped)."""
-        # Path: {base}/{source}/ingest_date={date}/{batch_id}.ndjson.gz
-```
-
-### 3.2 Spark Jobs
-
-#### ETL Job (`etl/main.py`)
-- **Input**: HDFS raw zone (NDJSON)
-- **Output**: HDFS processed zone (Parquet)
-- **Tables**: works, authors, work_authors, venues, citations
-
-#### Analytics Job (`analytics/main.py`)
-- **Input**: HDFS processed zone (Parquet)
-- **Output**: HDFS analytics zone (Parquet)
-- **Outputs**: topics, work_topics, metrics, trends, aggregates
-
-### 3.3 API Components
+### 3.3 API Services
 
 #### Data Service (`data_service.py`)
 - Uses **DuckDB** for efficient Parquet querying
 - Registers Parquet files as virtual tables
-- Executes SQL queries without loading all data
+- Dynamic stat computation (no stale pre-computed tables)
+- Citation neighborhood with valid edge filtering
 
-#### Elasticsearch Service (`elasticsearch_service.py`)
+#### Elasticsearch Service
 - Async client for non-blocking I/O
 - Bulk indexing for performance
 - Custom text analyzer for academic content
@@ -280,7 +262,7 @@ CREATE TABLE works (
     abstract        STRING,
     year            INT,
     pub_date        DATE,
-    primary_field   STRING,      -- Main category/concept
+    primary_field   STRING,
     fields          ARRAY<STRING>,
     doi             STRING,
     venue_id        STRING,
@@ -288,38 +270,11 @@ CREATE TABLE works (
 )
 PARTITIONED BY (year);
 
--- Authors
-CREATE TABLE authors (
-    author_id       STRING,      -- SHA256 hash of name
-    name            STRING,
-    affiliation     STRING
-);
-
--- Work-Author relationships
-CREATE TABLE work_authors (
-    work_id         STRING,
-    author_id       STRING,
-    position        INT          -- 0 = first author
-);
-
--- Citation edges
-CREATE TABLE citations (
-    citing_work_id  STRING,
-    cited_work_id   STRING
-);
-
--- Topics from LDA
+-- Topics from LDA (improved labels)
 CREATE TABLE topics (
     topic_id        INT,
-    label           STRING,      -- Top term as label
+    label           STRING,      -- Filtered, meaningful label
     top_terms       ARRAY<STRUCT<term: STRING, weight: FLOAT>>
-);
-
--- Work-Topic assignments
-CREATE TABLE work_topics (
-    work_id         STRING,
-    topic_id        INT,
-    topic_score     FLOAT
 );
 
 -- Computed metrics
@@ -327,41 +282,7 @@ CREATE TABLE metrics (
     work_id         STRING,
     pagerank        FLOAT,
     citation_count  INT,
-    community_id    BIGINT
-);
-```
-
-### 4.2 Analytics Aggregates
-
-```sql
--- Topic trends over time
-CREATE TABLE topic_trends (
-    year            INT,
-    topic_id        INT,
-    label           STRING,
-    paper_count     INT,
-    total_papers    INT,
-    topic_share     FLOAT
-);
-
--- Emerging topics
-CREATE TABLE emerging_topics (
-    topic_id        INT,
-    label           STRING,
-    paper_count     INT,
-    topic_share     FLOAT,
-    growth_rate     FLOAT
-);
-
--- Pre-computed rankings
-CREATE TABLE top_papers (
-    work_id         STRING,
-    title           STRING,
-    year            INT,
-    primary_field   STRING,
-    pagerank        FLOAT,
-    citation_count  INT,
-    community_id    BIGINT
+    community_id    BIGINT       -- Community from Label Propagation
 );
 ```
 
@@ -377,30 +298,13 @@ CREATE TABLE top_papers (
 | Processed | year | Time-range query pruning |
 | Search | - (auto-sharded) | Parallel search |
 
-### 5.2 Horizontal Scaling
+### 5.2 Year-Balanced Ingestion
 
-```
-                    ┌─────────────────┐
-                    │  Spark Master   │
-                    └────────┬────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         ▼                   ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  Spark Worker 1 │ │  Spark Worker 2 │ │  Spark Worker N │
-│  2 cores, 4GB   │ │  2 cores, 4GB   │ │  2 cores, 4GB   │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-
-To scale: Add workers via docker-compose scale or K8s replicas
-```
-
-### 5.3 Performance Optimizations
-
-1. **Broadcast joins**: Small dimension tables (topics, venues)
-2. **Partition pruning**: Year-based filtering
-3. **Column projection**: Select only needed columns
-4. **Predicate pushdown**: Parquet filter optimization
-5. **Caching**: Hot DataFrames cached in memory
+Prevents data skew by fetching proportionally from year bins:
+- 2015-2017: ~25% of records
+- 2018-2020: ~25% of records
+- 2021-2022: ~25% of records
+- 2023-2024: ~25% of records
 
 ---
 
@@ -417,7 +321,6 @@ services:
   # Compute
   spark-master:     # Job scheduling
   spark-worker-1:   # Task execution
-  spark-worker-2:   # Task execution (optional)
 
   # Search
   elasticsearch:    # Full-text search
@@ -433,27 +336,6 @@ services:
 ### 6.2 Network Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    scholarly-net (Docker Bridge)                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐      ┌──────────────┐                         │
-│  │  namenode    │◄────►│  datanode    │                         │
-│  │  :9000/:9870 │      │  :9864       │                         │
-│  └──────────────┘      └──────────────┘                         │
-│                                                                  │
-│  ┌──────────────┐      ┌──────────────┐                         │
-│  │ spark-master │◄────►│spark-worker-1│                         │
-│  │  :7077/:8080 │      │  :8081       │                         │
-│  └──────────────┘      └──────────────┘                         │
-│                                                                  │
-│  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐  │
-│  │elasticsearch │◄────►│   backend    │◄────►│  frontend    │  │
-│  │  :9200/:9300 │      │    :8000     │      │    :3000     │  │
-│  └──────────────┘      └──────────────┘      └──────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-
 External Access:
   - Frontend: http://localhost:3000
   - API: http://localhost:8000
@@ -466,7 +348,7 @@ External Access:
 
 ## 7. API Reference
 
-### 7.1 Endpoints
+### 7.1 Core Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -475,10 +357,14 @@ External Access:
 | GET | /stats/overview | Dataset statistics |
 | GET | /stats/yearly | Publications by year |
 | GET | /stats/sources | Publications by source |
+| GET | /stats/data-health | Data balance diagnostics |
 | GET | /topics | List all topics |
 | GET | /topics/trends | Topic share over time |
 | GET | /topics/emerging | High-growth topics |
 | GET | /topics/{id} | Topic details + papers |
+| GET | /topics/{id}/papers | Papers for a topic |
+| GET | /topics/{id}/year-histogram | Year distribution |
+| GET | /topics/{id}/why-trending | Trend explanation |
 | GET | /rankings/papers | Top papers by influence |
 | GET | /rankings/authors | Top authors |
 | GET | /rankings/comparison | PageRank vs citations |
@@ -499,73 +385,71 @@ GET /search?q=transformer&year_from=2020&source=arxiv&sort_by=pagerank
 | source | string | Source filter |
 | field | string | Field/category filter |
 | sort_by | string | relevance, year, citations, pagerank |
-| page | int | Page number (default: 1) |
-| page_size | int | Results per page (default: 20) |
 
 ---
 
-## 8. Configuration
+## 8. Frontend Architecture
 
-### 8.1 Demo Configuration
+### 8.1 Pages Structure
+
+```
+app/
+├── page.tsx              # Dashboard with KPIs and charts
+├── search/page.tsx       # Elasticsearch search with filters
+├── topics/page.tsx       # Topic trends (line, heatmap) + drilldown modal
+├── rankings/page.tsx     # Papers/authors by PageRank with modal
+├── graph/page.tsx        # Force graph + List view
+└── profile/page.tsx      # Saved papers and authors
+```
+
+### 8.2 Key Components
+
+| Component | Description |
+|-----------|-------------|
+| `ForceGraph` | D3-based citation network with pre-computed layout |
+| `TopicModal` | Drilldown modal with papers, authors, histogram |
+| `PaperModal` | Paper details with save/lookup actions |
+| `TopicHeatmap` | Nivo heatmap for topic × year matrix |
+| `SavedItemsContext` | React context for localStorage persistence |
+
+### 8.3 State Management
+
+- **React Query**: Server state caching and refetching
+- **Context API**: Saved items (papers, authors)
+- **localStorage**: Persistence of user preferences and saved items
+
+---
+
+## 9. Configuration
+
+### 9.1 Demo Configuration (`demo.yaml`)
 
 ```yaml
 mode: demo
 global:
   max_total_records: 1000
-  start_year: 2022
+  start_year: 2015
+  end_year: 2024
 
 arxiv:
   enabled: true
-  max_records: 400
-  categories: [cs.AI, cs.LG, cs.CL]
+  max_records: 200
+  year_distribution:
+    enabled: true
+  categories: [cs.AI, cs.LG, cs.CL, cs.CV]
 
 pubmed:
   enabled: true
-  max_records: 300
-  search_terms: ["machine learning", "deep learning"]
+  max_records: 200
 
 openalex:
   enabled: true
-  max_records: 300
-  filters:
-    concepts: [C41008148, C119857082]  # AI, ML
+  max_records: 600
 
 analytics:
   topics:
     num_topics: 10
-    max_iterations: 20
-  graph:
-    pagerank:
-      max_iterations: 10
-```
-
-### 8.2 Full Configuration
-
-```yaml
-mode: full
-global:
-  max_total_records: 1000000
-
-arxiv:
-  max_records: 500000
-  categories: [cs.*, stat.ML, q-bio.NC]
-
-pubmed:
-  max_records: 300000
-  use_api_key: true
-
-openalex:
-  max_records: 200000
-  filters:
-    cited_by_count_min: 5
-
-analytics:
-  topics:
-    num_topics: 50
-    max_iterations: 100
-  graph:
-    pagerank:
-      max_iterations: 30
+    stopwords: expanded  # 80+ scientific terms
 ```
 
 ---
@@ -574,33 +458,24 @@ analytics:
 
 ### Common Issues
 
-1. **HDFS Safe Mode**
-   ```bash
-   docker exec hdfs-namenode hdfs dfsadmin -safemode leave
-   ```
+1. **Data Imbalance (too many 2025 papers)**
+   - Enable year-balanced ingestion in config
+   - Re-run ingestion with `year_distribution.enabled: true`
 
-2. **Elasticsearch Index Missing**
-   ```bash
-   make index
-   ```
+2. **Topic Labels Generic ("Identified")**
+   - Verify expanded stopwords in analytics config
+   - Re-run analytics pipeline
 
-3. **Spark Job Failure**
-   - Check: `make logs CONTAINER=spark-master`
-   - Ensure workers are connected: http://localhost:8080
+3. **Citation Graph "Node Not Found"**
+   - Fixed in `data_service.py`: edges filtered to valid nodes only
 
-4. **Frontend API Connection**
-   - Verify backend is healthy: `curl localhost:8000/health`
-   - Check CORS settings in `main.py`
+4. **Rankings Modal Empty**
+   - Fixed: `get_top_papers` now includes abstract, source, doi
 
-### Health Checks
+### Data Health Check
 
 ```bash
-# All services
-make status
-
-# Individual checks
-curl localhost:8000/health        # API
-curl localhost:9200/_cluster/health  # Elasticsearch
-docker exec hdfs-namenode hdfs dfsadmin -report | head  # HDFS
+curl localhost:8000/stats/data-health | jq '.diagnosis'
 ```
 
+Expected: "Data looks balanced - year distribution is reasonable"

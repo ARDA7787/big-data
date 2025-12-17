@@ -191,3 +191,85 @@ async def get_topic_papers(
         "page_size": page_size,
         "papers": papers
     }
+
+
+@router.get("/{topic_id}/histogram")
+async def get_topic_year_histogram(
+    request: Request,
+    topic_id: int
+):
+    """
+    Get year histogram for a specific topic.
+    
+    Returns paper counts per year for the topic.
+    """
+    data_service = request.app.state.data_service
+    
+    # Verify topic exists
+    topic = data_service.get_topic_by_id(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    # Get year distribution for this topic
+    histogram = data_service.get_topic_year_histogram(topic_id)
+    
+    return {
+        "topic_id": topic_id,
+        "label": topic.get("label", f"Topic {topic_id}"),
+        "histogram": histogram
+    }
+
+
+@router.get("/{topic_id}/why-trending")
+async def explain_topic_trend(
+    request: Request,
+    topic_id: int
+):
+    """
+    Explain why a topic is trending.
+    
+    Returns growth analysis, top contributing years, and new papers.
+    """
+    data_service = request.app.state.data_service
+    
+    # Verify topic exists
+    topic = data_service.get_topic_by_id(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    # Get trend analysis
+    trends = data_service.get_topic_trends(topic_id=topic_id)
+    
+    # Calculate growth
+    if len(trends) >= 2:
+        sorted_trends = sorted(trends, key=lambda x: x.get('year', 0))
+        recent = sorted_trends[-1] if sorted_trends else {}
+        previous = sorted_trends[-2] if len(sorted_trends) > 1 else {}
+        
+        growth_rate = 0
+        if previous.get('paper_count', 0) > 0:
+            growth_rate = (
+                (recent.get('paper_count', 0) - previous.get('paper_count', 0)) 
+                / previous.get('paper_count', 1)
+            ) * 100
+    else:
+        growth_rate = 0
+        recent = trends[0] if trends else {}
+    
+    # Get recent papers
+    recent_papers = data_service.get_papers_by_topic(topic_id, limit=5)
+    
+    return {
+        "topic_id": topic_id,
+        "label": topic.get("label", f"Topic {topic_id}"),
+        "explanation": {
+            "growth_rate": round(growth_rate, 1),
+            "current_year_papers": recent.get('paper_count', 0),
+            "trend_direction": "growing" if growth_rate > 10 else "stable" if growth_rate > -10 else "declining"
+        },
+        "contributing_factors": [
+            f"Published {recent.get('paper_count', 0)} papers in {recent.get('year', 'N/A')}",
+            f"Year-over-year growth: {round(growth_rate, 1)}%",
+        ],
+        "recent_papers": recent_papers
+    }

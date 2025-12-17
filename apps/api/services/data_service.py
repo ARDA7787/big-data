@@ -108,15 +108,9 @@ class DataService:
     # =========================================================================
     
     def get_overall_stats(self) -> dict[str, Any]:
-        """Get overall dataset statistics."""
-        try:
-            result = self._query("SELECT * FROM overall_stats LIMIT 1")
-            if result:
-                return result[0]
-        except Exception:
-            pass
-        
-        # Fallback to computing from source tables
+        """Get overall dataset statistics - always computed fresh from source tables."""
+        # Always compute from source tables for accurate counts
+        # The overall_stats parquet may have stale/incorrect data
         stats = {}
         
         try:
@@ -126,10 +120,16 @@ class DataService:
             stats["total_works"] = 0
         
         try:
-            result = self._query("SELECT COUNT(*) as cnt FROM authors")
+            # First try counting unique authors from work_authors (most reliable)
+            result = self._query("SELECT COUNT(DISTINCT author_id) as cnt FROM work_authors")
             stats["total_authors"] = result[0]["cnt"] if result else 0
         except Exception:
-            stats["total_authors"] = 0
+            # Fallback to authors table
+            try:
+                result = self._query("SELECT COUNT(*) as cnt FROM authors")
+                stats["total_authors"] = result[0]["cnt"] if result else 0
+            except Exception:
+                stats["total_authors"] = 0
         
         try:
             result = self._query("SELECT COUNT(*) as cnt FROM citations")
@@ -144,7 +144,26 @@ class DataService:
             stats["years_covered"] = 0
         
         stats["sources"] = 3
-        stats["topics"] = 0
+        
+        # Count actual topics - try work_topics first (most reliable)
+        try:
+            result = self._query("SELECT COUNT(DISTINCT topic_id) as cnt FROM work_topics")
+            stats["topics"] = result[0]["cnt"] if result else 0
+        except Exception:
+            # Fallback to topics table
+            try:
+                result = self._query("SELECT COUNT(*) as cnt FROM topics")
+                stats["topics"] = result[0]["cnt"] if result else 0
+            except Exception:
+                stats["topics"] = 0
+        
+        # Ensure topics count is at least what we have via API
+        if stats["topics"] == 0:
+            try:
+                result = self._query("SELECT COUNT(DISTINCT topic_id) as cnt FROM topic_trends")
+                stats["topics"] = result[0]["cnt"] if result else 0
+            except Exception:
+                pass
         
         return stats
     
@@ -189,6 +208,20 @@ class DataService:
             FROM works
             GROUP BY source
             ORDER BY paper_count DESC
+        """)
+    
+    def get_year_source_stats(self) -> list[dict]:
+        """Get statistics by year and source for heatmap."""
+        return self._query("""
+            SELECT 
+                year,
+                SUM(CASE WHEN source = 'arxiv' THEN 1 ELSE 0 END) as arxiv,
+                SUM(CASE WHEN source = 'pubmed' THEN 1 ELSE 0 END) as pubmed,
+                SUM(CASE WHEN source = 'openalex' THEN 1 ELSE 0 END) as openalex
+            FROM works
+            WHERE year IS NOT NULL
+            GROUP BY year
+            ORDER BY year
         """)
     
     def get_data_quality_metrics(self) -> dict[str, Any]:
@@ -283,6 +316,19 @@ class DataService:
             LIMIT {limit}
         """)
     
+    def get_topic_year_histogram(self, topic_id: int) -> list[dict]:
+        """Get year distribution for a specific topic."""
+        return self._query(f"""
+            SELECT 
+                w.year,
+                COUNT(*) as paper_count
+            FROM works w
+            JOIN work_topics wt ON w.work_id = wt.work_id
+            WHERE wt.topic_id = {topic_id} AND w.year IS NOT NULL
+            GROUP BY w.year
+            ORDER BY w.year DESC
+        """)
+    
     # =========================================================================
     # Rankings
     # =========================================================================
@@ -295,27 +341,21 @@ class DataService:
         field: Optional[str] = None,
         limit: int = 50
     ) -> list[dict]:
-        """Get top-ranked papers."""
-        try:
-            # Try pre-computed
-            return self._query(f"""
-                SELECT * FROM top_papers
-                ORDER BY {sort_by} DESC
-                LIMIT {limit}
-            """)
-        except Exception:
-            pass
+        """Get top-ranked papers with full details including abstract and source.
         
-        # Compute from source tables
+        Always queries works table directly to ensure abstract/source/doi are included.
+        """
+        # Always compute from source tables to include all needed fields
         sql = """
             SELECT 
                 w.work_id, w.title, w.year, w.primary_field,
+                w.abstract, w.source, w.doi,
                 COALESCE(m.pagerank, 0) as pagerank,
                 COALESCE(m.citation_count, 0) as citation_count,
                 m.community_id
             FROM works w
             LEFT JOIN metrics m ON w.work_id = m.work_id
-            WHERE 1=1
+            WHERE w.title IS NOT NULL
         """
         
         if year_from:
@@ -412,17 +452,23 @@ class DataService:
         year_from: Optional[int] = None,
         year_to: Optional[int] = None
     ) -> dict[str, Any]:
-        """Get citation neighborhood of a work."""
+        """Get citation neighborhood of a work.
+        
+        IMPORTANT: Only returns edges where BOTH source and target exist in our dataset.
+        This prevents "node not found" errors in the graph visualization.
+        """
         nodes = []
         edges = []
         visited = {work_id}
         
-        # Get initial edges
+        # Get initial edges - ONLY where both nodes exist in works table
         if direction in ("citing", "both"):
             citing = self._query(f"""
-                SELECT citing_work_id as source, cited_work_id as target
-                FROM citations
-                WHERE cited_work_id = '{work_id}'
+                SELECT c.citing_work_id as source, c.cited_work_id as target
+                FROM citations c
+                JOIN works w1 ON c.citing_work_id = w1.work_id
+                JOIN works w2 ON c.cited_work_id = w2.work_id
+                WHERE c.cited_work_id = '{work_id}'
                 LIMIT {max_nodes}
             """)
             edges.extend(citing)
@@ -431,9 +477,11 @@ class DataService:
         
         if direction in ("cited", "both"):
             cited = self._query(f"""
-                SELECT citing_work_id as source, cited_work_id as target
-                FROM citations
-                WHERE citing_work_id = '{work_id}'
+                SELECT c.citing_work_id as source, c.cited_work_id as target
+                FROM citations c
+                JOIN works w1 ON c.citing_work_id = w1.work_id
+                JOIN works w2 ON c.cited_work_id = w2.work_id
+                WHERE c.citing_work_id = '{work_id}'
                 LIMIT {max_nodes}
             """)
             edges.extend(cited)
@@ -454,9 +502,18 @@ class DataService:
                 WHERE w.work_id IN ({ids_str})
             """)
         
+        # Get the set of valid node IDs
+        valid_node_ids = {n["work_id"] for n in nodes}
+        
+        # Filter edges to only include those where both source and target exist
+        filtered_edges = [
+            e for e in edges 
+            if e["source"] in valid_node_ids and e["target"] in valid_node_ids
+        ]
+        
         return {
             "nodes": nodes[:max_nodes],
-            "edges": edges,
+            "edges": filtered_edges,
             "truncated": len(visited) > max_nodes
         }
     

@@ -49,6 +49,8 @@ class ElasticsearchIndexer:
         tables = [
             ("works", processed_path / "works"),
             ("metrics", processed_path / "metrics"),
+            ("authors", processed_path / "authors"),
+            ("work_authors", processed_path / "work_authors"),
         ]
         
         for view_name, path in tables:
@@ -63,7 +65,22 @@ class ElasticsearchIndexer:
                     logger.warning(f"Failed to register {view_name}: {e}")
     
     def _get_documents(self, limit: int = None) -> list[dict]:
-        """Query documents to index."""
+        """Query documents to index with aggregated authors."""
+        # First, create aggregated authors view
+        try:
+            self.conn.execute("""
+                CREATE OR REPLACE VIEW work_author_names AS
+                SELECT 
+                    wa.work_id,
+                    LIST(a.name ORDER BY wa.position) as authors
+                FROM work_authors wa
+                JOIN authors a ON wa.author_id = a.author_id
+                GROUP BY wa.work_id
+            """)
+            logger.info("Created work_author_names aggregation view")
+        except Exception as e:
+            logger.warning(f"Could not create authors view: {e}")
+        
         sql = """
             SELECT 
                 w.work_id,
@@ -79,9 +96,11 @@ class ElasticsearchIndexer:
                 w.venue_name,
                 COALESCE(m.pagerank, 0.0) as pagerank,
                 COALESCE(m.citation_count, 0) as citation_count,
-                m.community_id
+                m.community_id,
+                wan.authors
             FROM works w
             LEFT JOIN metrics m ON w.work_id = m.work_id
+            LEFT JOIN work_author_names wan ON w.work_id = wan.work_id
             WHERE w.title IS NOT NULL
         """
         
@@ -99,6 +118,10 @@ class ElasticsearchIndexer:
             # Convert fields array to list if needed
             if doc.get("fields") and not isinstance(doc["fields"], list):
                 doc["fields"] = [doc["fields"]]
+            
+            # Convert authors to list if needed
+            if doc.get("authors") and not isinstance(doc["authors"], list):
+                doc["authors"] = [doc["authors"]]
             
             # Ensure numeric types
             doc["pagerank"] = float(doc.get("pagerank") or 0.0)

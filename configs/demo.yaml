@@ -10,7 +10,7 @@ mode: demo
 # ------------------------------------------------------------------------------
 global:
   max_total_records: 1000          # Total records across all sources
-  start_year: 2022                 # Only recent papers
+  start_year: 2015                 # Include older papers for trend visibility
   end_year: 2024
   checkpoint_dir: /data/checkpoints
   raw_data_dir: /data/raw
@@ -20,13 +20,25 @@ global:
 # ------------------------------------------------------------------------------
 # arXiv Configuration
 # ------------------------------------------------------------------------------
+# NOTE: arXiv API returns most recent papers first by default.
+# To get better year balance, use date filtering or multiple queries.
 arxiv:
   enabled: true
-  max_records: 400
+  max_records: 200                   # Reduced to balance sources
   categories:
     - cs.AI                        # Artificial Intelligence
     - cs.LG                        # Machine Learning
     - cs.CL                        # Computation and Language (NLP)
+  # Year-based sampling to ensure historical coverage
+  # This fetches papers across year bins to avoid 2025 dominance
+  year_distribution:
+    enabled: true                  # Enable year-balanced fetching
+    min_per_year: 15               # Minimum papers per year from 2015-2024
+    prefer_seminal: true           # Try to fetch highly-cited older papers
+  # Pass global config to ingester for year range
+  global:
+    start_year: 2015
+    end_year: 2024
   rate_limit:
     requests_per_second: 0.33      # 1 request per 3 seconds (API requirement)
     retry_attempts: 3
@@ -46,13 +58,19 @@ arxiv:
 # ------------------------------------------------------------------------------
 # PubMed Configuration
 # ------------------------------------------------------------------------------
+# NOTE: PubMed can filter by date range using mindate/maxdate parameters.
+# Use year_distribution to get balanced historical coverage.
 pubmed:
   enabled: true
-  max_records: 300
+  max_records: 200                   # Reduced to balance sources
   search_terms:
     - "machine learning"
     - "deep learning"
     - "natural language processing"
+  # Year-based sampling to ensure historical coverage
+  year_distribution:
+    enabled: true
+    min_per_year: 15               # Minimum papers per year from 2015-2024
   rate_limit:
     requests_per_second: 3         # 3/sec without API key, 10/sec with
     retry_attempts: 3
@@ -72,15 +90,19 @@ pubmed:
 # ------------------------------------------------------------------------------
 # OpenAlex Configuration
 # ------------------------------------------------------------------------------
+# NOTE: OpenAlex provides excellent historical coverage and citation data.
+# Increased allocation since it naturally returns a balanced year distribution.
 openalex:
   enabled: true
-  max_records: 300
+  max_records: 600                   # Increased - provides better year balance
   filters:
     concepts:
       - C41008148                  # Artificial Intelligence
       - C119857082                 # Machine Learning
-    from_publication_date: "2022-01-01"
+    from_publication_date: "2015-01-01"
     to_publication_date: "2024-12-31"
+    # Prioritize papers with citations for better quality
+    cited_by_count: ">0"
   rate_limit:
     requests_per_second: 10        # Polite pool rate
     retry_attempts: 3

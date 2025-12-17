@@ -3,14 +3,21 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { TrendingUp, Zap, ArrowUpRight } from 'lucide-react'
-import { api } from '@/lib/api'
+import { TrendingUp, Zap, ArrowUpRight, BarChart3, Grid3X3 } from 'lucide-react'
+import { api, Topic } from '@/lib/api'
 import { formatNumber, cn } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
 import { TopicTrendsChart } from '@/components/charts/topic-trends-chart'
+import { TopicHeatmap } from '@/components/charts/topic-heatmap'
+import { TopicModal } from '@/components/ui/topic-modal'
+
+type ChartMode = 'line' | 'heatmap'
 
 export default function TopicsPage() {
   const [selectedTopic, setSelectedTopic] = useState<number | null>(null)
+  const [modalTopic, setModalTopic] = useState<Topic | null>(null)
+  const [chartMode, setChartMode] = useState<ChartMode>('line')
+  const [yearRange, setYearRange] = useState<[number, number]>([2015, 2025])
 
   const { data: topics } = useQuery({
     queryKey: ['topics'],
@@ -55,10 +62,15 @@ export default function TopicsPage() {
             >
               <Card
                 className={cn(
-                  'cursor-pointer p-4 transition-all hover:border-primary-200 hover:shadow-soft-lg',
+                  'cursor-pointer p-4 transition-all hover:border-primary-200 hover:shadow-soft-lg group',
                   selectedTopic === topic.topic_id && 'border-primary-300 ring-2 ring-primary-500/20'
                 )}
                 onClick={() => setSelectedTopic(topic.topic_id)}
+                onDoubleClick={() => {
+                  // Convert emerging topic to Topic format for modal
+                  const fullTopic = topics?.find(t => t.topic_id === topic.topic_id)
+                  if (fullTopic) setModalTopic(fullTopic)
+                }}
               >
                 <div className="flex items-start justify-between">
                   <span className="text-2xl font-bold text-neutral-200">
@@ -69,11 +81,14 @@ export default function TopicsPage() {
                     {(topic.growth_rate * 100).toFixed(0)}%
                   </div>
                 </div>
-                <h3 className="mt-2 font-semibold text-neutral-900">
+                <h3 className="mt-2 font-semibold text-neutral-900 group-hover:text-primary-600 transition-colors">
                   {topic.label}
                 </h3>
                 <p className="mt-1 text-sm text-neutral-500">
                   {formatNumber(topic.paper_count)} papers
+                </p>
+                <p className="mt-1 text-xs text-neutral-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  Double-click for details
                 </p>
               </Card>
             </motion.div>
@@ -81,10 +96,10 @@ export default function TopicsPage() {
         </div>
       </section>
 
-      {/* Trend Visualization */}
-      <section>
+      {/* Trend Visualizations */}
+      <section className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-semibold text-neutral-900">
                 Topic Trends Over Time
@@ -95,20 +110,70 @@ export default function TopicsPage() {
                   : 'Select a topic to see its trend'}
               </p>
             </div>
-            {selectedTopic && (
-              <button
-                onClick={() => setSelectedTopic(null)}
-                className="text-sm text-primary-600 hover:text-primary-700"
-              >
-                Show all topics
-              </button>
+            <div className="flex items-center gap-2">
+              {selectedTopic && (
+                <button
+                  onClick={() => setSelectedTopic(null)}
+                  className="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  Show all
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {/* Chart Mode Selector */}
+          <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-lg mb-4 w-fit">
+            <button
+              onClick={() => setChartMode('line')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                chartMode === 'line' 
+                  ? 'bg-white text-neutral-900 shadow-sm' 
+                  : 'text-neutral-500 hover:text-neutral-700'
+              )}
+            >
+              <BarChart3 className="h-4 w-4" />
+              Line
+            </button>
+            <button
+              onClick={() => setChartMode('heatmap')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                chartMode === 'heatmap' 
+                  ? 'bg-white text-neutral-900 shadow-sm' 
+                  : 'text-neutral-500 hover:text-neutral-700'
+              )}
+            >
+              <Grid3X3 className="h-4 w-4" />
+              Heatmap
+            </button>
+          </div>
+
+          <div className="h-80">
+            {chartMode === 'line' && (
+              <TopicTrendsChart
+                data={trends?.trends || []}
+                selectedTopic={selectedTopic}
+              />
+            )}
+            {chartMode === 'heatmap' && (
+              <TopicHeatmap data={trends?.trends || []} />
             )}
           </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-neutral-900">
+              Topic × Year Heatmap
+            </h3>
+            <p className="text-sm text-neutral-500">
+              Paper counts by topic and publication year
+            </p>
+          </div>
           <div className="h-80">
-            <TopicTrendsChart
-              data={trends?.trends || []}
-              selectedTopic={selectedTopic}
-            />
+            <TopicHeatmap data={trends?.trends || []} />
           </div>
         </Card>
       </section>
@@ -131,19 +196,20 @@ export default function TopicsPage() {
             <Card
               key={topic.topic_id}
               className={cn(
-                'cursor-pointer p-5 transition-all hover:border-primary-200 hover:shadow-soft-lg',
+                'cursor-pointer p-5 transition-all hover:border-primary-200 hover:shadow-soft-lg group',
                 selectedTopic === topic.topic_id && 'border-primary-300 ring-2 ring-primary-500/20'
               )}
               onClick={() => setSelectedTopic(topic.topic_id)}
+              onDoubleClick={() => setModalTopic(topic)}
             >
               <div className="flex items-start justify-between">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-sm font-bold text-primary-600">
                   {topic.topic_id}
                 </div>
-                <ArrowUpRight className="h-4 w-4 text-neutral-300" />
+                <ArrowUpRight className="h-4 w-4 text-neutral-300 group-hover:text-primary-500 transition-colors" />
               </div>
 
-              <h3 className="mt-3 font-semibold text-neutral-900">
+              <h3 className="mt-3 font-semibold text-neutral-900 group-hover:text-primary-600 transition-colors">
                 {topic.label}
               </h3>
 
@@ -166,10 +232,21 @@ export default function TopicsPage() {
                   {formatNumber(topic.paper_count)} papers
                 </p>
               )}
+              
+              <p className="mt-2 text-xs text-neutral-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                Double-click for details
+              </p>
             </Card>
           ))}
         </div>
       </section>
+
+      {/* Topic Drilldown Modal */}
+      <TopicModal
+        topic={modalTopic}
+        onClose={() => setModalTopic(null)}
+        open={!!modalTopic}
+      />
     </div>
   )
 }

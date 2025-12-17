@@ -18,6 +18,8 @@ import { StatsCard } from '@/components/ui/stats-card'
 import { Card } from '@/components/ui/card'
 import { YearlyChart } from '@/components/charts/yearly-chart'
 import { SourcesChart } from '@/components/charts/sources-chart'
+import { YearSourceHeatmap } from '@/components/charts/year-source-heatmap'
+import { CitationDistribution } from '@/components/charts/citation-distribution'
 
 export default function HomePage() {
   const { data: stats, isLoading: statsLoading } = useQuery({
@@ -38,6 +40,16 @@ export default function HomePage() {
   const { data: emerging } = useQuery({
     queryKey: ['emerging'],
     queryFn: api.getEmerging,
+  })
+
+  const { data: yearSource } = useQuery({
+    queryKey: ['year-source'],
+    queryFn: api.getYearSourceStats,
+  })
+
+  const { data: topPapers } = useQuery({
+    queryKey: ['top-papers-for-dist'],
+    queryFn: () => api.getTopPapers({ limit: 200 }),
   })
 
   const containerVariants = {
@@ -99,29 +111,33 @@ export default function HomePage() {
             value={stats?.total_works || 0}
             icon={FileText}
             loading={statsLoading}
-            trend={{ value: 12, label: 'vs last month' }}
+            emptyMessage="Run pipeline"
+            trend={stats?.total_works ? { value: 12, label: 'demo data' } : undefined}
           />
           <StatsCard
             title="Authors"
             value={stats?.total_authors || 0}
             icon={Users}
             loading={statsLoading}
+            emptyMessage="Run pipeline"
           />
           <StatsCard
             title="Citations"
             value={stats?.total_citations || 0}
             icon={Quote}
             loading={statsLoading}
+            emptyMessage="No citation data"
           />
           <StatsCard
             title="Years Covered"
             value={stats?.years_covered || 0}
             icon={Calendar}
             loading={statsLoading}
+            emptyMessage="No date range"
           />
           <StatsCard
             title="Sources"
-            value={stats?.sources || 0}
+            value={stats?.sources || 3}
             icon={Database}
             loading={statsLoading}
           />
@@ -130,6 +146,7 @@ export default function HomePage() {
             value={stats?.topics || 0}
             icon={Lightbulb}
             loading={statsLoading}
+            emptyMessage="Run analytics"
           />
         </div>
       </motion.section>
@@ -138,9 +155,19 @@ export default function HomePage() {
       <motion.section variants={itemVariants} className="grid gap-6 lg:grid-cols-3">
         {/* Publications Over Time */}
         <Card className="col-span-2 p-6">
-          <h3 className="text-sm font-medium text-neutral-500">
-            Publications Over Time
-          </h3>
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-neutral-500">
+                Publications in Dataset
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Papers indexed from arXiv, PubMed & OpenAlex
+              </p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full font-medium">
+              Sample Dataset
+            </span>
+          </div>
           <div className="mt-4 h-64">
             <YearlyChart data={yearly || []} />
           </div>
@@ -148,11 +175,59 @@ export default function HomePage() {
 
         {/* Sources Distribution */}
         <Card className="p-6">
-          <h3 className="text-sm font-medium text-neutral-500">
-            Data Sources
-          </h3>
+          <div className="flex items-start justify-between">
+            <h3 className="text-sm font-medium text-neutral-500">
+              Data Sources
+            </h3>
+          </div>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            Distribution in our index
+          </p>
           <div className="mt-4 h-64">
             <SourcesChart data={sources?.sources || []} />
+          </div>
+        </Card>
+      </motion.section>
+
+      {/* Additional Charts Row */}
+      <motion.section variants={itemVariants} className="grid gap-6 lg:grid-cols-2">
+        {/* Year x Source Heatmap */}
+        <Card className="p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-neutral-500">
+                Papers by Year & Source
+              </h3>
+              <p className="text-xs text-neutral-400 mt-1">
+                Distribution of indexed papers by source
+              </p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 bg-neutral-100 text-neutral-500 rounded-full font-medium">
+              In Dataset
+            </span>
+          </div>
+          <div className="mt-4 h-72">
+            <YearSourceHeatmap data={yearSource?.data || []} />
+          </div>
+        </Card>
+
+        {/* Citation Distribution */}
+        <Card className="p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-neutral-500">
+                Citation Distribution
+              </h3>
+              <p className="text-xs text-neutral-400 mt-1">
+                Citation counts within indexed papers
+              </p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 bg-neutral-100 text-neutral-500 rounded-full font-medium">
+              In Dataset
+            </span>
+          </div>
+          <div className="mt-4 h-72">
+            <CitationDistribution data={topPapers || []} />
           </div>
         </Card>
       </motion.section>

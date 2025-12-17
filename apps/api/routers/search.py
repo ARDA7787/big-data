@@ -23,6 +23,8 @@ class SearchResult(BaseModel):
     doi: Optional[str] = None
     pagerank: Optional[float] = None
     citation_count: Optional[int] = None
+    authors: Optional[List[str]] = None
+    venue_name: Optional[str] = None
     score: float
 
 
@@ -115,7 +117,10 @@ async def search_works(
                 "years": {"terms": {"field": "year", "size": 20}},
                 "sources": {"terms": {"field": "source", "size": 10}},
                 "fields": {"terms": {"field": "primary_field.keyword", "size": 20}}
-            }
+            },
+            _source=["work_id", "title", "abstract", "year", "source", 
+                     "primary_field", "doi", "pagerank", "citation_count",
+                     "authors", "venue_name"]
         )
     except Exception as e:
         # Fallback to data service if ES is unavailable
@@ -144,6 +149,15 @@ async def search_works(
     search_results = []
     for hit in hits.get("hits", []):
         source_data = hit.get("_source", {})
+        # Parse authors - can be list of dicts or strings
+        authors_raw = source_data.get("authors", [])
+        authors = []
+        if authors_raw:
+            for a in authors_raw[:5]:  # Limit to 5 authors
+                if isinstance(a, dict):
+                    authors.append(a.get("name", str(a)))
+                else:
+                    authors.append(str(a))
         search_results.append(SearchResult(
             work_id=source_data.get("work_id", hit.get("_id")),
             title=source_data.get("title", ""),
@@ -154,6 +168,8 @@ async def search_works(
             doi=source_data.get("doi"),
             pagerank=source_data.get("pagerank"),
             citation_count=source_data.get("citation_count"),
+            authors=authors if authors else None,
+            venue_name=source_data.get("venue_name"),
             score=hit.get("_score", 0)
         ))
     

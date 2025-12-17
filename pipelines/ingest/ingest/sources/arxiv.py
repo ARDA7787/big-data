@@ -158,9 +158,51 @@ class ArxivIngester:
         
         return records, total_results
     
+    def _get_year_ranges(self) -> list[tuple[int, int, int]]:
+        """
+        Get year ranges for balanced fetching.
+        
+        Returns:
+            List of (start_year, end_year, records_per_range) tuples
+        """
+        year_dist_config = self.config.get('year_distribution', {})
+        if not year_dist_config.get('enabled', False):
+            return []
+        
+        # Get global config for year range
+        start_year = self.config.get('global', {}).get('start_year', 2015)
+        end_year = self.config.get('global', {}).get('end_year', 2024)
+        
+        # Define year bins
+        year_bins = [
+            (2015, 2017),   # Early period
+            (2018, 2020),   # Middle period
+            (2021, 2022),   # Recent period
+            (2023, 2024),   # Latest period
+        ]
+        
+        # Filter bins to match our config range
+        valid_bins = [(s, e) for s, e in year_bins if s >= start_year and e <= end_year]
+        if not valid_bins:
+            valid_bins = [(start_year, end_year)]
+        
+        # Distribute records across bins (weighted toward recent)
+        # Give 40% to latest, 25% to recent, 20% to middle, 15% to early
+        weights = [0.15, 0.20, 0.25, 0.40][:len(valid_bins)]
+        if len(weights) < len(valid_bins):
+            weights = [1.0 / len(valid_bins)] * len(valid_bins)
+        
+        total = self.max_records
+        result = []
+        for i, (start, end) in enumerate(valid_bins):
+            records = int(total * weights[i])
+            result.append((start, end, max(20, records)))  # At least 20 per bin
+        
+        return result
+
     async def ingest(self) -> dict[str, Any]:
         """
-        Run the arXiv ingestion.
+        Run the arXiv ingestion with year-balanced sampling.
         
         Returns:
             Ingestion result summary
@@ -180,7 +222,10 @@ class ArxivIngester:
         if start_offset > 0:
             logger.info(f"Resuming from offset {start_offset}")
         
-        query = self._build_query(self.categories)
+        base_query = self._build_query(self.categories)
+        
+        # Get year ranges for balanced fetching
+        year_ranges = self._get_year_ranges()
         
         async with RetryableHTTPClient(
             self.rate_limiter,
@@ -188,80 +233,112 @@ class ArxivIngester:
             retry_backoff_factor=self.config.get('rate_limit', {}).get('retry_backoff_factor', 2)
         ) as client:
             
-            offset = start_offset
-            total_results = None
+            if year_ranges:
+                # Year-balanced fetching
+                for start_year, end_year, target_records in year_ranges:
+                    if result['records_ingested'] >= self.max_records:
+                        break
+                    
+                    logger.info(f"Fetching arXiv records for years {start_year}-{end_year} (target: {target_records})")
+                    
+                    # arXiv API uses submittedDate for filtering
+                    # Format: YYYYMMDDHHMM
+                    date_from = f"{start_year}01010000"
+                    date_to = f"{end_year}12312359"
+                    
+                    # Add date filter to query
+                    query = f"({base_query}) AND submittedDate:[{date_from} TO {date_to}]"
+                    
+                    year_records = await self._fetch_records_for_query(
+                        client, query, target_records, result
+                    )
+                    
+                    logger.info(f"Fetched {year_records} records for years {start_year}-{end_year}")
+            else:
+                # Original behavior - fetch most recent
+                await self._fetch_records_for_query(
+                    client, base_query, self.max_records, result
+                )
+        
+        # Update rate limit stats
+        result['rate_limit_stats'] = self.rate_limiter.get_stats()
+        
+        logger.info(f"arXiv ingestion complete: {result['records_ingested']} records")
+        return result
+    
+    async def _fetch_records_for_query(
+        self, 
+        client: 'RetryableHTTPClient', 
+        query: str, 
+        max_for_query: int,
+        result: dict[str, Any]
+    ) -> int:
+        """Fetch records for a specific query, up to max_for_query."""
+        query_records = 0
+        offset = 0
+        total_results = None
+        
+        while query_records < max_for_query and result['records_ingested'] < self.max_records:
+            # Build request
+            params = {
+                'search_query': query,
+                'start': offset,
+                'max_results': min(self.batch_size, max_for_query - query_records),
+                'sortBy': 'relevance',  # Changed from submittedDate for better diversity
+                'sortOrder': 'descending'
+            }
             
-            while True:
-                # Check if we've reached the limit
-                if result['records_ingested'] >= self.max_records:
-                    logger.info(f"Reached max records limit: {self.max_records}")
+            try:
+                logger.debug(f"Fetching arXiv records: offset={offset}")
+                response = await client.get(self.BASE_URL, params=params)
+                
+                records, total = self._parse_response(response.text)
+                
+                if total_results is None:
+                    total_results = total
+                    logger.info(f"Total available records for query: {total_results}")
+                
+                if not records:
+                    logger.info("No more records available")
                     break
                 
-                # Build request
-                params = {
-                    'search_query': query,
-                    'start': offset,
-                    'max_results': min(self.batch_size, self.max_records - result['records_ingested']),
-                    'sortBy': 'submittedDate',
-                    'sortOrder': 'descending'
-                }
+                # Write batch
+                batch_id = f"batch_{result['records_ingested']:08d}"
+                self.storage_mgr.write_records('arxiv', records, batch_id)
                 
-                try:
-                    logger.debug(f"Fetching arXiv records: offset={offset}")
-                    response = await client.get(self.BASE_URL, params=params)
+                result['records_ingested'] += len(records)
+                result['batches'] += 1
+                query_records += len(records)
+                
+                # Save checkpoint
+                self.checkpoint_mgr.save_checkpoint(
+                    'arxiv',
+                    str(result['records_ingested']),
+                    result['records_ingested'],
+                    {'total_available': total_results or 0}
+                )
+                
+                logger.info(
+                    f"arXiv progress: {result['records_ingested']}/{self.max_records} "
+                    f"({100 * result['records_ingested'] / self.max_records:.1f}%)"
+                )
+                
+                offset += len(records)
+                
+                # Check if we've fetched all available
+                if total_results and offset >= total_results:
+                    logger.info("Fetched all available records for this query")
+                    break
                     
-                    records, total = self._parse_response(response.text)
-                    
-                    if total_results is None:
-                        total_results = total
-                        logger.info(f"Total available records: {total_results}")
-                    
-                    if not records:
-                        logger.info("No more records available")
-                        break
-                    
-                    # Write batch
-                    batch_id = f"batch_{offset:08d}"
-                    self.storage_mgr.write_records('arxiv', records, batch_id)
-                    
-                    result['records_ingested'] += len(records)
-                    result['batches'] += 1
-                    
-                    # Save checkpoint
-                    self.checkpoint_mgr.save_checkpoint(
-                        'arxiv',
-                        str(offset + len(records)),
-                        result['records_ingested'],
-                        {'total_available': total_results}
-                    )
-                    
-                    logger.info(
-                        f"arXiv progress: {result['records_ingested']}/{self.max_records} "
-                        f"({100 * result['records_ingested'] / self.max_records:.1f}%)"
-                    )
-                    
-                    offset += len(records)
-                    
-                    # Check if we've fetched all available
-                    if offset >= total_results:
-                        logger.info("Fetched all available records")
-                        break
-                        
-                except Exception as e:
-                    error_msg = f"Error at offset {offset}: {str(e)}"
-                    logger.error(error_msg)
-                    result['errors'].append(error_msg)
-                    
-                    # Continue with next batch after error
-                    offset += self.batch_size
-            
-            result['rate_limit_stats'] = client.get_stats()
+            except Exception as e:
+                error_msg = f"Error at offset {offset}: {str(e)}"
+                logger.error(error_msg)
+                result['errors'].append(error_msg)
+                
+                # Continue with next batch after error
+                offset += self.batch_size
         
-        # Clear checkpoint on successful completion
-        if not result['errors']:
-            self.checkpoint_mgr.clear_checkpoint('arxiv')
-        
-        return result
+        return query_records
 
 
 async def main():

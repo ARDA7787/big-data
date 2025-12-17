@@ -2,6 +2,7 @@
 
 import { ResponsiveLine } from '@nivo/line'
 import { TopicTrend } from '@/lib/api'
+import { TopicsIllustration } from '@/components/icons/illustrations'
 
 interface TopicTrendsChartProps {
   data: TopicTrend[]
@@ -16,28 +17,53 @@ const topicColors = [
 export function TopicTrendsChart({ data, selectedTopic }: TopicTrendsChartProps) {
   if (!data.length) {
     return (
-      <div className="flex h-full items-center justify-center text-neutral-400">
-        No trend data available
+      <div className="flex h-full flex-col items-center justify-center text-neutral-400">
+        <TopicsIllustration className="h-20 w-20 opacity-60" />
+        <p className="mt-2 text-sm">No trend data available</p>
       </div>
     )
   }
 
-  // Group by topic
-  const groupedByTopic = data.reduce((acc, item) => {
-    if (!acc[item.topic_id]) {
-      acc[item.topic_id] = {
+  // Extract all unique years and sort them numerically
+  const allYears = [...new Set(data.map(d => Number(d.year)))].filter(y => !isNaN(y)).sort((a, b) => a - b)
+  
+  // Validate year ordering (log warning if data was out of order)
+  const originalYears = data.map(d => Number(d.year)).filter(y => !isNaN(y))
+  const wasMonotonic = originalYears.every((y, i) => i === 0 || y >= originalYears[i-1])
+  if (!wasMonotonic) {
+    console.warn('[TopicTrendsChart] Data years were not monotonically sorted - applying sort')
+  }
+
+  // Group by topic, ensuring each series has data sorted by year
+  const groupedByTopic: Record<number, { 
+    id: string; 
+    topic_id: number; 
+    color: string; 
+    data: Array<{ x: number; y: number }> 
+  }> = {}
+
+  data.forEach((item) => {
+    const year = Number(item.year)
+    if (isNaN(year)) return
+
+    if (!groupedByTopic[item.topic_id]) {
+      groupedByTopic[item.topic_id] = {
         id: item.label,
         topic_id: item.topic_id,
         color: topicColors[item.topic_id % topicColors.length],
         data: [],
       }
     }
-    acc[item.topic_id].data.push({
-      x: item.year,
+    groupedByTopic[item.topic_id].data.push({
+      x: year,
       y: item.topic_share,
     })
-    return acc
-  }, {} as Record<number, any>)
+  })
+
+  // Sort each series' data by year (x) to ensure chronological order
+  Object.values(groupedByTopic).forEach(series => {
+    series.data.sort((a, b) => a.x - b.x)
+  })
 
   let chartData = Object.values(groupedByTopic)
 
@@ -49,17 +75,29 @@ export function TopicTrendsChart({ data, selectedTopic }: TopicTrendsChartProps)
     chartData = chartData
       .map((series) => ({
         ...series,
-        avgShare: series.data.reduce((sum: number, d: any) => sum + d.y, 0) / series.data.length,
+        avgShare: series.data.reduce((sum, d) => sum + d.y, 0) / series.data.length,
       }))
       .sort((a, b) => b.avgShare - a.avgShare)
       .slice(0, 5)
   }
 
+  // Ensure all series have the same x-axis values by sorting chartData by first year
+  // This helps Nivo render x-axis in correct order
+  chartData.sort((a, b) => {
+    const aFirstYear = a.data[0]?.x ?? 0
+    const bFirstYear = b.data[0]?.x ?? 0
+    return aFirstYear - bFirstYear
+  })
+
   return (
     <ResponsiveLine
       data={chartData}
       margin={{ top: 20, right: 120, bottom: 50, left: 60 }}
-      xScale={{ type: 'point' }}
+      xScale={{ 
+        type: 'linear',  // Use linear scale for numeric years
+        min: Math.min(...allYears),
+        max: Math.max(...allYears),
+      }}
       yScale={{
         type: 'linear',
         min: 0,
@@ -76,6 +114,8 @@ export function TopicTrendsChart({ data, selectedTopic }: TopicTrendsChartProps)
         legend: 'Year',
         legendOffset: 40,
         legendPosition: 'middle',
+        tickValues: allYears, // Explicitly set tick values to sorted years
+        format: (value) => String(Math.round(value as number)), // Display as integer
       }}
       axisLeft={{
         tickSize: 0,
@@ -155,11 +195,10 @@ export function TopicTrendsChart({ data, selectedTopic }: TopicTrendsChartProps)
             <span className="font-medium text-neutral-900">{point.serieId}</span>
           </div>
           <div className="mt-1 text-sm text-neutral-500">
-            {point.data.xFormatted}: {((point.data.y as number) * 100).toFixed(1)}%
+            Year {point.data.x}: {((point.data.y as number) * 100).toFixed(1)}%
           </div>
         </div>
       )}
     />
   )
 }
-

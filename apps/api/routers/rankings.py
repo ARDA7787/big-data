@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 class RankedPaper(BaseModel):
-    """Paper with ranking metrics."""
+    """Paper with ranking metrics and full details for modal display."""
     work_id: str
     title: str
     year: Optional[int] = None
@@ -19,6 +19,10 @@ class RankedPaper(BaseModel):
     pagerank: float
     citation_count: int
     community_id: Optional[int] = None
+    # Additional fields for paper modal
+    abstract: Optional[str] = None
+    source: Optional[str] = None
+    doi: Optional[str] = None
 
 
 class RankedAuthor(BaseModel):
@@ -80,7 +84,10 @@ async def get_top_papers(
         primary_field=p.get("primary_field"),
         pagerank=p.get("pagerank", 0.0),
         citation_count=int(p.get("citation_count", 0)),
-        community_id=p.get("community_id")
+        community_id=p.get("community_id"),
+        abstract=p.get("abstract"),
+        source=p.get("source"),
+        doi=p.get("doi")
     ) for p in papers]
 
 

@@ -2,6 +2,7 @@
 
 import { ResponsiveLine } from '@nivo/line'
 import { YearlyStats } from '@/lib/api'
+import { ChartIllustration } from '@/components/icons/illustrations'
 
 interface YearlyChartProps {
   data: YearlyStats[]
@@ -10,18 +11,24 @@ interface YearlyChartProps {
 export function YearlyChart({ data }: YearlyChartProps) {
   if (!data.length) {
     return (
-      <div className="flex h-full items-center justify-center text-neutral-400">
-        No data available
+      <div className="flex h-full flex-col items-center justify-center text-neutral-400">
+        <ChartIllustration className="h-20 w-20 opacity-60" />
+        <p className="mt-2 text-sm">No data available</p>
       </div>
     )
   }
+
+  // Sort by year ascending and ensure numeric comparison
+  const sortedData = [...data]
+    .filter((d) => d.year != null)
+    .sort((a, b) => Number(a.year) - Number(b.year))
 
   const chartData = [
     {
       id: 'publications',
       color: 'hsl(233, 85%, 65%)',
-      data: data.map((d) => ({
-        x: d.year,
+      data: sortedData.map((d) => ({
+        x: Number(d.year),
         y: d.paper_count,
       })),
     },

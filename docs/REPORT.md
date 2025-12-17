@@ -1,4 +1,4 @@
-# Scalable Scholarly Knowledge Graph
+# ScholarGraph - Scalable Scholarly Knowledge Graph
 ## Mining Research Papers & Citation Networks at Scale
 
 ---
@@ -15,14 +15,15 @@
 
 ## Executive Summary
 
-This project presents a **Scalable Scholarly Knowledge Graph** platform that unifies metadata from three major academic data sources—arXiv, PubMed, and OpenAlex—into a single, queryable knowledge graph. The system enables researchers, institutions, and analysts to:
+This project presents **ScholarGraph**, a Scalable Scholarly Knowledge Graph platform that unifies metadata from three major academic data sources—arXiv, PubMed, and OpenAlex—into a single, queryable knowledge graph. The system enables researchers, institutions, and analysts to:
 
 1. **Discover** influential papers across disciplines using PageRank-based influence metrics
 2. **Track** emerging research topics and their evolution over time
-3. **Explore** citation networks to understand research lineage and communities
-4. **Search** millions of papers with full-text capabilities and faceted filtering
+3. **Explore** citation networks through an interactive force-directed graph
+4. **Search** papers with full-text capabilities and faceted filtering
+5. **Save** and organize papers of interest for later reference
 
-The platform is built on a modern big data stack including **Apache Spark** for distributed processing, **HDFS** for scalable storage, **GraphFrames** for citation network analysis, and **Elasticsearch** for search. A polished web dashboard provides intuitive access to insights.
+The platform is built on a modern big data stack including **Apache Spark** for distributed processing, **HDFS** for scalable storage, **GraphFrames** for citation network analysis, and **Elasticsearch** for search. A polished Next.js web dashboard provides intuitive access to insights.
 
 ### Key Results
 
@@ -46,24 +47,17 @@ Academic research produces over **3 million new papers annually** across thousan
 - **Citation Bias**: High-citation papers dominate, hiding influential but newer work
 - **Trend Blindness**: Difficulty identifying emerging research directions
 - **Siloed Data**: arXiv, PubMed, and other databases don't interoperate
+- **Data Imbalance**: API queries often return mostly recent papers, skewing analysis
 
-### 1.2 Market Opportunity
+### 1.2 Our Solutions
 
-| Stakeholder | Pain Point | Our Solution |
-|-------------|-----------|--------------|
-| **Researchers** | Hours spent on literature review | Unified search + influence ranking |
-| **Funding Agencies** | Identifying impactful research | PageRank-based quality signals |
-| **Universities** | Tracking research trends | Topic trend analysis |
-| **Publishers** | Understanding field dynamics | Citation network visualization |
-
-### 1.3 Competitive Landscape
-
-| Platform | Unified Sources | Graph Analytics | Topic Trends | Open API |
-|----------|-----------------|-----------------|--------------|----------|
-| Google Scholar | ✅ | ❌ | ❌ | ❌ |
-| Semantic Scholar | ✅ | Partial | ❌ | ✅ |
-| OpenAlex | ✅ | ❌ | ❌ | ✅ |
-| **Our Platform** | ✅ | ✅ | ✅ | ✅ |
+| Challenge | Our Solution |
+|-----------|--------------|
+| Information Overload | Unified search across 3 sources |
+| Citation Bias | PageRank-based influence ranking |
+| Trend Blindness | Topic trend analysis with heatmaps |
+| Siloed Data | Single knowledge graph model |
+| Data Imbalance | Year-balanced ingestion strategy |
 
 ---
 
@@ -83,138 +77,73 @@ Academic research produces over **3 million new papers annually** across thousan
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    INGESTION LAYER (Python)                             │
 │  • Rate limiting & exponential backoff                                  │
+│  • Year-balanced sampling (2015-2024)                                   │
 │  • Checkpointing & resumability                                         │
-│  • NDJSON output to HDFS raw zone                                       │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    STORAGE LAYER (HDFS)                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│  RAW ZONE                      │  PROCESSED ZONE                        │
-│  /data/raw/{source}/{date}/    │  /data/processed/{table}/year={YYYY}/  │
-│  • NDJSON files (gzipped)      │  • Parquet files (partitioned)         │
-│  • Immutable                   │  • Columnar, compressed                │
-└────────────────────────────────┴────────────────────────────────────────┘
+│                    STORAGE LAYER (HDFS + Parquet)                       │
+└────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    PROCESSING LAYER (Spark)                             │
-├─────────────────────────────────────────────────────────────────────────┤
-│  ETL Jobs                      │  Analytics Jobs                        │
-│  • Schema normalization        │  • Topic modeling (TF-IDF + LDA)       │
-│  • Deduplication (DOI-based)   │  • PageRank (GraphFrames)              │
-│  • ID resolution               │  • Community detection (LP)            │
-│  • Citation edge building      │  • Trend analysis                      │
-└────────────────────────────────┴────────────────────────────────────────┘
+│  • ETL: Schema normalization, deduplication                             │
+│  • Analytics: LDA topics, PageRank, community detection                 │
+│  • Improved stopwords (80+ scientific terms)                            │
+└────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    SERVING LAYER                                        │
-├─────────────────────────────────┬───────────────────────────────────────┤
-│  Elasticsearch                  │  FastAPI Backend                      │
-│  • Full-text search             │  • REST API                           │
-│  • Faceted filtering            │  • Parquet aggregates (DuckDB)        │
-│  • Influence metrics            │  • Graph queries                      │
-└─────────────────────────────────┴───────────────────────────────────────┘
+│                    SERVING LAYER (FastAPI + Elasticsearch)              │
+└────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    PRESENTATION LAYER (Next.js)                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Dashboard │ Search │ Topics │ Rankings │ Graph Explorer                │
+│  Dashboard │ Search │ Topics │ Rankings │ Citation Graph │ Profile      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Data Model
-
-```
-                    ┌─────────────┐
-                    │   WORKS     │
-                    │─────────────│
-                    │ work_id     │
-                    │ source_id   │
-                    │ title       │
-                    │ abstract    │
-                    │ year        │
-                    │ venue_id    │
-                    │ doi         │
-                    └─────┬───────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-         ▼                ▼                ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│ WORK_AUTHORS│  │  CITATIONS  │  │ WORK_TOPICS │
-│─────────────│  │─────────────│  │─────────────│
-│ work_id     │  │ citing_id   │  │ work_id     │
-│ author_id   │  │ cited_id    │  │ topic_id    │
-│ position    │  └─────────────┘  │ score       │
-└─────┬───────┘                   └─────┬───────┘
-      │                                 │
-      ▼                                 ▼
-┌─────────────┐                  ┌─────────────┐
-│   AUTHORS   │                  │   TOPICS    │
-│─────────────│                  │─────────────│
-│ author_id   │                  │ topic_id    │
-│ name        │                  │ label       │
-│ affiliation │                  │ top_terms   │
-└─────────────┘                  └─────────────┘
-```
-
-### 2.3 Technology Justification
+### 2.2 Technology Justification
 
 | Component | Technology | Why This Choice |
 |-----------|------------|-----------------|
-| **Distributed Storage** | HDFS | Industry standard; scales to petabytes; fault-tolerant |
-| **File Format** | Parquet | Columnar for analytics; 10x compression; predicate pushdown |
-| **Processing** | Apache Spark | Unified batch/stream; scales horizontally; rich ecosystem |
-| **Graph Analytics** | GraphFrames | Native Spark integration; distributed PageRank & LP |
+| **Distributed Storage** | HDFS | Industry standard; scales to petabytes |
+| **File Format** | Parquet | Columnar for analytics; 10x compression |
+| **Processing** | Apache Spark | Unified batch processing; scales horizontally |
+| **Graph Analytics** | GraphFrames | Native Spark integration; distributed PageRank |
 | **Topic Modeling** | Spark MLlib | Distributed LDA; handles millions of documents |
 | **Search** | Elasticsearch | Full-text search; faceting; sub-100ms queries |
 | **Backend API** | FastAPI | Async Python; auto-docs; high performance |
 | **Frontend** | Next.js + React | SSR; excellent DX; TypeScript support |
+| **Visualization** | D3.js + Nivo | Interactive SVG graphs; smooth animations |
 
 ---
 
 ## 3. Data Acquisition
 
-### 3.1 Data Sources
+### 3.1 Year-Balanced Ingestion
 
-#### arXiv API
-- **Coverage**: 2.3M+ preprints in physics, CS, math, biology
-- **Endpoint**: `http://export.arxiv.org/api/query`
-- **Rate Limit**: 1 request / 3 seconds (enforced)
-- **Fields Extracted**: arxiv_id, title, abstract, authors, categories, dates, DOI
+A key innovation in our system is **year-balanced ingestion** to prevent data skew:
 
-#### PubMed E-utilities
-- **Coverage**: 35M+ biomedical articles
-- **Endpoints**: ESearch + EFetch
-- **Rate Limit**: 3 req/sec (10 with API key)
-- **Fields Extracted**: PMID, title, abstract, authors, MeSH terms, journal
+| Year Range | Target % | Purpose |
+|------------|----------|---------|
+| 2015-2017 | 25% | Historical context |
+| 2018-2020 | 25% | Pre-pandemic research |
+| 2021-2022 | 25% | Recent developments |
+| 2023-2024 | 25% | Latest research |
 
-#### OpenAlex
-- **Coverage**: 250M+ works with citations
-- **Endpoint**: `https://api.openalex.org/works`
-- **Rate Limit**: 100K requests/day (polite pool)
-- **Key Value**: Citation relationships (referenced_works field)
+This prevents the common problem where API "latest-first" ordering results in 70%+ papers from the current year.
 
-### 3.2 Ingestion Pipeline Features
+### 3.2 Data Sources
 
-1. **Robust Rate Limiting**: Token bucket algorithm respects API limits
-2. **Exponential Backoff**: Automatic retry on 429/5xx errors
-3. **Checkpointing**: Resume from interruption without data loss
-4. **Partitioned Storage**: `source/ingest_date=YYYY-MM-DD/` organization
-5. **NDJSON Format**: Streaming-friendly for Spark ingestion
-
-### 3.3 Data Quality
-
-| Metric | arXiv | PubMed | OpenAlex |
-|--------|-------|--------|----------|
-| Missing Abstract | 2% | 15% | 8% |
-| Missing DOI | 30% | 5% | 10% |
-| Missing Authors | 0% | 2% | 1% |
-| Has Citations | N/A | N/A | 85% |
+| Source | Coverage | Rate Limit | Key Value |
+|--------|----------|------------|-----------|
+| arXiv | 2.3M+ preprints | 1 req/3s | CS/Physics papers |
+| PubMed | 35M+ articles | 3-10 req/s | Biomedical literature |
+| OpenAlex | 250M+ works | 100K/day | Citation relationships |
 
 ---
 
@@ -222,85 +151,108 @@ Academic research produces over **3 million new papers annually** across thousan
 
 ### 4.1 Topic Modeling (LDA)
 
-**Goal**: Automatically discover research themes across the corpus.
-
-**Pipeline**:
-1. **Preprocessing**: Tokenization → Stopword removal
+**Improved Pipeline:**
+1. **Preprocessing**: Tokenization → 80+ scientific stopword removal
 2. **Feature Extraction**: TF-IDF with vocabulary size 10K
 3. **LDA**: 10-50 topics, 50 iterations, EM optimizer
+4. **Label Filtering**: Reject generic verbs ("identified", "using", "method")
 
-**Sample Topics Discovered** (Demo Dataset):
+**Sample Topics Discovered:**
 
 | Topic ID | Label | Top Terms |
 |----------|-------|-----------|
-| 0 | Machine Learning | neural, network, learning, deep, training |
-| 1 | NLP | language, text, model, bert, transformer |
-| 2 | Computer Vision | image, detection, visual, cnn, recognition |
-| 3 | Reinforcement | agent, reward, policy, environment, action |
+| 0 | Language | transformer, bert, nlp, text, generation |
+| 1 | Image | detection, visual, recognition, cnn, segmentation |
+| 2 | Cancer | tumor, treatment, clinical, patient, therapy |
+| 3 | Social | network, community, user, online, media |
 
 ### 4.2 Citation Network Analysis
 
-**PageRank Algorithm**:
+**PageRank Algorithm:**
 - Measures influence by citation network structure
 - A paper cited by influential papers scores higher
 - Parameters: damping factor = 0.85, 20 iterations
 
 **Key Insight**: PageRank surfaces "hidden gems"—papers with moderate citation counts but high structural influence.
 
-![PageRank vs Citations](placeholder_scatter.png)
-*Figure: Papers with high PageRank but moderate citations represent undervalued influential work.*
-
-**Community Detection** (Label Propagation):
+**Community Detection (Label Propagation):**
 - Identifies research clusters/subfields
 - Used for graph visualization coloring
 - O(V + E) complexity, Spark-parallelized
 
 ### 4.3 Trend Analysis
 
-**Metrics Computed**:
+**Metrics Computed:**
 - Topic share per year: `papers_in_topic / total_papers`
 - Growth rate: `(share_t - share_t-1) / share_t-1`
 - Emerging topic: growth rate > 150%
 
-![Topic Trends](placeholder_trends.png)
-*Figure: Topic share evolution over time showing the rise of transformer-based methods.*
+**Visualizations:**
+- Line chart: Topic trends over time
+- Heatmap: Topic × Year matrix showing paper counts
 
 ---
 
-## 5. Results & Insights
+## 5. User Interface
 
-### 5.1 Influence Rankings (Demo Dataset)
+### 5.1 Dashboard
 
-**Top 5 Papers by PageRank**:
+The home page provides an **executive overview**:
+- **KPI Tiles**: Total works, authors, citations, topics with icons
+- **Publications Timeline**: Interactive line chart by year
+- **Source Distribution**: Pie chart (arXiv, PubMed, OpenAlex)
+- **Field Distribution**: Top research fields
+- **Sample Dataset Labels**: Clear indication of data scope
 
-| Rank | Title | Year | PageRank | Citations |
-|------|-------|------|----------|-----------|
-| 1 | Attention Is All You Need | 2017 | 0.0234 | 45,000+ |
-| 2 | BERT: Pre-training of Deep Bidirectional... | 2018 | 0.0189 | 35,000+ |
-| 3 | Deep Residual Learning for Image Recognition | 2016 | 0.0156 | 80,000+ |
-| 4 | Adam: A Method for Stochastic Optimization | 2014 | 0.0142 | 60,000+ |
-| 5 | Dropout: A Simple Way to Prevent... | 2014 | 0.0128 | 25,000+ |
+### 5.2 Search
 
-**Insight**: PageRank correctly identifies foundational papers even when raw citation counts differ significantly.
+Elasticsearch-powered search with:
+- Full-text query on title/abstract
+- Filters: year range, source, field
+- Sort options: relevance, citations, PageRank, year
+- **Paper Modal**: Click any result for full details + save option
 
-### 5.2 Emerging Topics (2023-2024)
+### 5.3 Topic Explorer
 
-| Topic | Growth Rate | 2024 Share |
-|-------|-------------|------------|
-| Large Language Models | +340% | 18.5% |
-| Diffusion Models | +280% | 12.3% |
-| Multimodal Learning | +190% | 8.7% |
-| AI Safety | +175% | 5.2% |
+- **Topic Cards**: Grid of topics with top terms
+- **Trend Visualizations**: 
+  - Line chart (topic share over time)
+  - Heatmap (topic × year matrix)
+- **Topic Drilldown Modal**: Double-click to see:
+  - Top papers for the topic
+  - Top authors for the topic
+  - Year histogram
+  - "Why Trending?" explanation
 
-### 5.3 Community Structure
+### 5.4 Rankings
 
-The citation network reveals **distinct research communities**:
-- **Community A**: Deep learning foundations (CNNs, optimization)
-- **Community B**: NLP and transformers
-- **Community C**: Reinforcement learning
-- **Community D**: Computer vision applications
+- **Dual View**: Papers and Authors tabs
+- **Multiple Layouts**: List, Grid, Card views
+- **Paper Modal**: Full details with abstract, source, DOI
+- **PageRank vs Citations**: Compare influence metrics
 
-Communities show limited cross-citation, suggesting potential for interdisciplinary collaboration.
+### 5.5 Citation Graph Explorer
+
+**Advanced Force-Directed Visualization:**
+- **Pre-computed Layout**: Static positions (no jittering)
+- **Settings Panel**: Customize colors and node sizes
+  - Color by: Community, Year, Citations
+  - Size by: PageRank, Citations, Uniform
+- **Search in Graph**: Find and highlight specific papers
+- **Zoom Controls**: Vertical toolbar on left side
+- **Side Panel**: Click any node for full paper details
+  - Year, Citations, PageRank, Community
+  - Save paper button
+  - "Look Up Paper" link
+- **Labels Toggle**: Show/hide all node labels
+- **Export**: Download graph as SVG
+
+### 5.6 Profile / Saved Items
+
+- **Persistent Storage**: localStorage-based
+- **Saved Papers**: List with quick actions
+- **Saved Authors**: List with quick actions
+- **Actions**: Look up, view citations, remove
 
 ---
 
@@ -325,66 +277,20 @@ Communities show limited cross-citation, suggesting potential for interdisciplin
 | Topic Trends | 80ms | 200ms |
 | Graph Neighborhood | 100ms | 350ms |
 
-### 6.3 Scalability Analysis
+### 6.3 Data Quality Improvements
 
-The system is designed for **horizontal scalability**:
-
-- **Storage**: HDFS scales by adding DataNodes
-- **Compute**: Spark scales by adding Workers
-- **Search**: Elasticsearch scales by adding shards/nodes
-
-Projected capacity at 10 nodes:
-- 100M+ papers
-- 1B+ citation edges
-- Sub-second query latency
+| Issue | Before | After |
+|-------|--------|-------|
+| Year Distribution | 77% from 2025 | ~20% per year range |
+| Topic Labels | Generic ("Identified") | Meaningful nouns |
+| Citation Graph Edges | Invalid node refs | Filtered to valid only |
+| Rankings Modal | Missing data | Full paper details |
 
 ---
 
-## 7. User Interface
+## 7. Deployment
 
-### 7.1 Dashboard
-
-The home page provides an **executive overview**:
-- KPI tiles (total works, authors, citations, topics)
-- Publications timeline chart
-- Data source distribution
-- Emerging topics highlights
-
-![Dashboard Screenshot](placeholder_dashboard.png)
-
-### 7.2 Search
-
-Elasticsearch-powered search with:
-- Full-text query on title/abstract
-- Filters: year range, source, field
-- Sort options: relevance, citations, PageRank, year
-- Faceted navigation
-
-### 7.3 Topic Explorer
-
-- Topic trends over time (stacked area chart)
-- Drill-down to papers/authors per topic
-- Emerging topics table with growth rates
-
-### 7.4 Rankings
-
-- Papers by PageRank vs citation count
-- Authors by cumulative influence
-- Scatter plot comparing PR vs citations
-- Filter by field and year
-
-### 7.5 Graph Explorer
-
-- Interactive force-directed visualization
-- N-hop neighborhood exploration
-- Community coloring
-- Node size by influence
-
----
-
-## 8. Deployment
-
-### 8.1 Local Development
+### 7.1 Local Development
 
 ```bash
 # One-command demo
@@ -394,68 +300,65 @@ make demo
 open http://localhost:3000
 ```
 
-### 8.2 Production (Single VM)
+### 7.2 Docker Compose Stack
 
-Recommended: Ubuntu 22.04, 8+ vCPUs, 32GB RAM, 200GB SSD
-
-```bash
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-
-# Clone and deploy
-git clone <repo>
-cd scholarly-knowledge-graph
-make up-prod
-make full-pipeline CONFIG=full
-```
+| Service | Port | Purpose |
+|---------|------|---------|
+| Frontend | 3000 | Next.js dashboard |
+| Backend | 8000 | FastAPI REST API |
+| Elasticsearch | 9200 | Search engine |
+| Spark Master | 8080 | Job scheduling |
+| HDFS NameNode | 9870 | Storage UI |
 
 ---
 
-## 9. Limitations & Future Work
+## 8. Limitations & Future Work
 
-### 9.1 Current Limitations
+### 8.1 Current Limitations
 
 1. **Author Disambiguation**: Name-based hashing may conflate authors
 2. **Abstract Availability**: ~10% of papers lack abstracts
 3. **Citation Lag**: OpenAlex data may be 1-2 weeks delayed
 4. **Single VM**: Production needs cluster for full scale
 
-### 9.2 Future Enhancements
+### 8.2 Future Enhancements
 
 | Enhancement | Complexity | Impact |
 |-------------|------------|--------|
 | Real-time citation updates | High | Better trend detection |
 | Author disambiguation (ML) | Medium | Improved rankings |
 | Full-text PDF analysis | High | Deeper topic modeling |
-| Multi-tenant SaaS | High | Commercial viability |
-| Citation prediction | Medium | Research planning tool |
+| Export/sharing features | Low | User convenience |
+| Collaborative collections | Medium | Team workflows |
 
 ---
 
-## 10. Conclusion
+## 9. Conclusion
 
-The **Scalable Scholarly Knowledge Graph** demonstrates that modern big data technologies can transform fragmented academic data into actionable intelligence. Key achievements:
+**ScholarGraph** demonstrates that modern big data technologies can transform fragmented academic data into actionable intelligence. Key achievements:
 
 1. **Unified 3 major data sources** into a coherent knowledge graph
-2. **Implemented distributed analytics** (PageRank, LDA, community detection)
-3. **Built production-ready infrastructure** with Docker Compose
-4. **Delivered polished visualization** for non-technical users
+2. **Implemented year-balanced ingestion** to prevent data skew
+3. **Improved topic modeling** with expanded scientific stopwords
+4. **Built interactive citation graph** with pre-computed stable layout
+5. **Delivered polished visualization** with save/export functionality
 
 The platform provides a foundation for future academic analytics products and demonstrates proficiency in big data engineering, distributed systems, and full-stack development.
 
 ---
 
-## Appendix A: API Documentation
+## Appendix A: API Endpoints
 
-Full API documentation available at `http://localhost:8000/docs`
-
-Key Endpoints:
-- `GET /search` - Full-text search with filters
-- `GET /stats/overview` - Dataset statistics
-- `GET /topics` - Topic list with terms
-- `GET /topics/trends` - Topic share over time
-- `GET /rankings/papers` - Paper rankings
-- `GET /graph/neighborhood/{work_id}` - Citation neighborhood
+| Endpoint | Description |
+|----------|-------------|
+| `GET /search` | Full-text search with filters |
+| `GET /stats/overview` | Dataset statistics |
+| `GET /stats/data-health` | Data balance diagnostics |
+| `GET /topics` | Topic list with terms |
+| `GET /topics/{id}` | Topic details with papers |
+| `GET /topics/{id}/year-histogram` | Year distribution |
+| `GET /rankings/papers` | Paper rankings with full details |
+| `GET /graph/neighborhood/{work_id}` | Citation neighborhood |
 
 ## Appendix B: Reproducibility
 
@@ -468,9 +371,8 @@ cd scholarly-knowledge-graph
 make demo
 
 # Verify outputs
-ls data/processed/  # Parquet files
-curl localhost:9200/_cat/indices  # ES index
-curl localhost:8000/stats/overview  # API stats
+curl localhost:8000/stats/data-health  # Check year balance
+curl localhost:8000/topics | jq '.[].label'  # Check topic labels
 ```
 
 ## Appendix C: References
@@ -485,4 +387,3 @@ curl localhost:8000/stats/overview  # API stats
 ---
 
 *Report generated for CS-GY 6513 Big Data, Fall 2024*
-
