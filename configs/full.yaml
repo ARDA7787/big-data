@@ -1,0 +1,238 @@
+# ==============================================================================
+# Full Configuration - Scalable Scholarly Knowledge Graph
+# ==============================================================================
+# Production-scale dataset for comprehensive analysis (~100K+ papers)
+# Estimated time: 2-4 hours depending on API limits
+
+mode: full
+
+# ------------------------------------------------------------------------------
+# Global Settings
+# ------------------------------------------------------------------------------
+global:
+  max_total_records: 100000        # Total records across all sources
+  start_year: 2018                 # Papers from last 6 years
+  end_year: 2024
+  checkpoint_dir: /data/checkpoints
+  raw_data_dir: /data/raw
+  processed_data_dir: /data/processed
+  analytics_dir: /data/analytics
+
+# ------------------------------------------------------------------------------
+# arXiv Configuration
+# ------------------------------------------------------------------------------
+arxiv:
+  enabled: true
+  max_records: 50000
+  categories:
+    # Computer Science
+    - cs.AI                        # Artificial Intelligence
+    - cs.LG                        # Machine Learning
+    - cs.CL                        # Computation and Language (NLP)
+    - cs.CV                        # Computer Vision
+    - cs.NE                        # Neural and Evolutionary Computing
+    - cs.RO                        # Robotics
+    - cs.IR                        # Information Retrieval
+    # Statistics
+    - stat.ML                      # Machine Learning (Stats)
+    # Quantitative Biology
+    - q-bio.NC                     # Neurons and Cognition
+    - q-bio.QM                     # Quantitative Methods
+  rate_limit:
+    requests_per_second: 0.33      # 1 request per 3 seconds (API requirement)
+    retry_attempts: 5
+    retry_backoff_factor: 2
+  batch_size: 100
+  fields:
+    - id
+    - title
+    - summary
+    - authors
+    - categories
+    - published
+    - updated
+    - doi
+    - links
+    - journal_ref
+    - comment
+
+# ------------------------------------------------------------------------------
+# PubMed Configuration
+# ------------------------------------------------------------------------------
+pubmed:
+  enabled: true
+  max_records: 30000
+  search_terms:
+    - "machine learning"
+    - "deep learning"
+    - "neural network"
+    - "natural language processing"
+    - "computer vision"
+    - "reinforcement learning"
+    - "transformer model"
+    - "large language model"
+    - "artificial intelligence"
+  rate_limit:
+    requests_per_second: 3         # 3/sec without API key
+    retry_attempts: 5
+    retry_backoff_factor: 2
+  batch_size: 200
+  use_api_key: false               # Set to true and provide api_key if available
+  # api_key: your_ncbi_api_key     # Uncomment and set for 10 req/sec
+  fields:
+    - pmid
+    - title
+    - abstract
+    - authors
+    - journal
+    - pubdate
+    - mesh
+    - keywords
+    - doi
+    - pmc
+
+# ------------------------------------------------------------------------------
+# OpenAlex Configuration
+# ------------------------------------------------------------------------------
+openalex:
+  enabled: true
+  max_records: 20000
+  filters:
+    concepts:
+      - C41008148                  # Artificial Intelligence
+      - C119857082                 # Machine Learning
+      - C154945302                 # Deep Learning
+      - C204321447                 # Natural Language Processing
+      - C31972630                  # Computer Vision
+    from_publication_date: "2018-01-01"
+    to_publication_date: "2024-12-31"
+    cited_by_count_min: 5          # Only papers with at least 5 citations
+    has_doi: true
+  rate_limit:
+    requests_per_second: 10        # Polite pool rate
+    retry_attempts: 5
+    retry_backoff_factor: 2
+  batch_size: 200
+  per_page: 200
+  fields:
+    - id
+    - doi
+    - title
+    - display_name
+    - publication_year
+    - publication_date
+    - type
+    - cited_by_count
+    - authorships
+    - concepts
+    - primary_location
+    - referenced_works
+    - related_works
+    - open_access
+    - abstract_inverted_index
+    - cited_by_api_url
+  email: "scholarly-graph@nyu.edu"  # For polite pool
+
+# ------------------------------------------------------------------------------
+# Spark Configuration
+# ------------------------------------------------------------------------------
+spark:
+  app_name: "ScholarlyKG-ETL-Full"
+  master: "spark://spark-master:7077"
+  driver_memory: "4g"
+  executor_memory: "4g"
+  executor_cores: 2
+  num_executors: 2
+  shuffle_partitions: 100          # Higher for larger datasets
+  adaptive_query_execution: true
+  parquet:
+    compression: snappy
+    partition_by:
+      - year
+
+# ------------------------------------------------------------------------------
+# Analytics Configuration
+# ------------------------------------------------------------------------------
+analytics:
+  # Topic Modeling (LDA)
+  topics:
+    enabled: true
+    num_topics: 30                 # More topics for larger corpus
+    max_iterations: 50
+    min_doc_freq: 20               # Higher threshold for quality
+    max_doc_freq_ratio: 0.5
+    vocabulary_size: 20000
+    optimizer: em                  # 'em' or 'online'
+    
+  # Citation Graph Analysis
+  graph:
+    enabled: true
+    pagerank:
+      max_iterations: 20
+      reset_probability: 0.15
+      tolerance: 0.001
+    community_detection:
+      algorithm: label_propagation
+      max_iterations: 10
+    
+  # Trend Analysis
+  trends:
+    enabled: true
+    time_granularity: year         # year, quarter, month
+    min_papers_per_period: 20
+    emerging_threshold: 1.5        # Growth rate threshold for "emerging"
+    smoothing_window: 2            # Years for rolling average
+
+# ------------------------------------------------------------------------------
+# Elasticsearch Configuration
+# ------------------------------------------------------------------------------
+elasticsearch:
+  host: elasticsearch
+  port: 9200
+  index_name: scholarly_works
+  index_settings:
+    number_of_shards: 3            # Multiple shards for production
+    number_of_replicas: 0          # 0 for single-node, 1+ for production
+    refresh_interval: "30s"        # Less frequent refresh for bulk indexing
+  batch_size: 500
+  mappings:
+    title_boost: 3.0
+    abstract_boost: 1.0
+    field_boost: 2.0
+
+# ------------------------------------------------------------------------------
+# Output Configuration
+# ------------------------------------------------------------------------------
+output:
+  # Pre-computed aggregates for API
+  aggregates:
+    top_papers_limit: 5000
+    top_authors_limit: 1000
+    topic_trends_granularity: year
+  
+  # Sampling for graph visualization
+  graph_sampling:
+    max_nodes_per_community: 500
+    max_edges_per_visualization: 10000
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: /data/logs/pipeline_full.log
+  rotation:
+    max_bytes: 10485760            # 10MB
+    backup_count: 5
+
+# ------------------------------------------------------------------------------
+# Monitoring (Optional)
+# ------------------------------------------------------------------------------
+monitoring:
+  enabled: false
+  prometheus_port: 9090
+  metrics:
+    - ingestion_records_total
+    - spark_job_duration_seconds
+    - elasticsearch_index_size_bytes

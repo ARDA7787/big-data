@@ -1,0 +1,20 @@
+# Spark Jobs Dependencies
+# =======================
+# Note: These are typically bundled with Spark, listed for documentation
+
+# Required for local development/testing
+pyspark>=3.5.0
+
+# Configuration
+pyyaml>=6.0
+
+# GraphFrames (loaded via --packages in spark-submit)
+# graphframes>=0.8.3
+
+# Data handling
+pyarrow>=14.0.0
+pandas>=2.1.0
+
+# Logging
+structlog>=23.2.0
+

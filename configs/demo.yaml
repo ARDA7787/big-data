@@ -1,0 +1,170 @@
+# ==============================================================================
+# Demo Configuration - Scalable Scholarly Knowledge Graph
+# ==============================================================================
+# Small dataset for quick demos and grading (~1000 papers, ~5 minutes)
+
+mode: demo
+
+# ------------------------------------------------------------------------------
+# Global Settings
+# ------------------------------------------------------------------------------
+global:
+  max_total_records: 1000          # Total records across all sources
+  start_year: 2022                 # Only recent papers
+  end_year: 2024
+  checkpoint_dir: /data/checkpoints
+  raw_data_dir: /data/raw
+  processed_data_dir: /data/processed
+  analytics_dir: /data/analytics
+
+# ------------------------------------------------------------------------------
+# arXiv Configuration
+# ------------------------------------------------------------------------------
+arxiv:
+  enabled: true
+  max_records: 400
+  categories:
+    - cs.AI                        # Artificial Intelligence
+    - cs.LG                        # Machine Learning
+    - cs.CL                        # Computation and Language (NLP)
+  rate_limit:
+    requests_per_second: 0.33      # 1 request per 3 seconds (API requirement)
+    retry_attempts: 3
+    retry_backoff_factor: 2
+  batch_size: 100
+  fields:
+    - id
+    - title
+    - summary
+    - authors
+    - categories
+    - published
+    - updated
+    - doi
+    - links
+
+# ------------------------------------------------------------------------------
+# PubMed Configuration
+# ------------------------------------------------------------------------------
+pubmed:
+  enabled: true
+  max_records: 300
+  search_terms:
+    - "machine learning"
+    - "deep learning"
+    - "natural language processing"
+  rate_limit:
+    requests_per_second: 3         # 3/sec without API key, 10/sec with
+    retry_attempts: 3
+    retry_backoff_factor: 2
+  batch_size: 100
+  use_api_key: false               # Set to true if NCBI API key available
+  fields:
+    - pmid
+    - title
+    - abstract
+    - authors
+    - journal
+    - pubdate
+    - mesh
+    - doi
+
+# ------------------------------------------------------------------------------
+# OpenAlex Configuration
+# ------------------------------------------------------------------------------
+openalex:
+  enabled: true
+  max_records: 300
+  filters:
+    concepts:
+      - C41008148                  # Artificial Intelligence
+      - C119857082                 # Machine Learning
+    from_publication_date: "2022-01-01"
+    to_publication_date: "2024-12-31"
+  rate_limit:
+    requests_per_second: 10        # Polite pool rate
+    retry_attempts: 3
+    retry_backoff_factor: 2
+  batch_size: 200
+  per_page: 200
+  fields:
+    - id
+    - doi
+    - title
+    - display_name
+    - publication_year
+    - publication_date
+    - cited_by_count
+    - authorships
+    - concepts
+    - primary_location
+    - referenced_works
+    - related_works
+  email: "scholarly-graph@nyu.edu"  # For polite pool
+
+# ------------------------------------------------------------------------------
+# Spark ETL Configuration
+# ------------------------------------------------------------------------------
+spark:
+  app_name: "ScholarlyKG-ETL-Demo"
+  master: "spark://spark-master:7077"
+  driver_memory: "2g"
+  executor_memory: "2g"
+  executor_cores: 2
+  shuffle_partitions: 10           # Small for demo
+  parquet:
+    compression: snappy
+    partition_by:
+      - year
+
+# ------------------------------------------------------------------------------
+# Analytics Configuration
+# ------------------------------------------------------------------------------
+analytics:
+  # Topic Modeling (LDA)
+  topics:
+    enabled: true
+    num_topics: 10                 # Fewer topics for demo
+    max_iterations: 20
+    min_doc_freq: 5
+    max_doc_freq_ratio: 0.7
+    vocabulary_size: 5000
+    
+  # Citation Graph Analysis
+  graph:
+    enabled: true
+    pagerank:
+      max_iterations: 10
+      reset_probability: 0.15
+    community_detection:
+      algorithm: label_propagation
+      max_iterations: 5
+    
+  # Trend Analysis
+  trends:
+    enabled: true
+    time_granularity: year         # year, quarter, month
+    min_papers_per_period: 5
+    emerging_threshold: 1.5        # Growth rate threshold
+
+# ------------------------------------------------------------------------------
+# Elasticsearch Configuration
+# ------------------------------------------------------------------------------
+elasticsearch:
+  host: elasticsearch
+  port: 9200
+  index_name: scholarly_works
+  index_settings:
+    number_of_shards: 1            # Single shard for demo
+    number_of_replicas: 0
+  batch_size: 100
+  refresh_interval: "5s"
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: /data/logs/pipeline.log
+
