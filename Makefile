@@ -164,8 +164,10 @@ analytics: ## Run Spark analytics jobs
 	docker exec spark-master /spark/bin/spark-submit \
 		--master spark://spark-master:7077 \
 		--deploy-mode client \
-		--driver-memory 2g \
-		--executor-memory 2g \
+		--driver-memory 1g \
+		--executor-memory 1g \
+		--conf spark.driver.maxResultSize=512m \
+		--conf spark.sql.shuffle.partitions=8 \
 		--packages graphframes:graphframes:0.8.2-spark3.2-s_2.12 \
 		/opt/spark-jobs/analytics/main.py \
 		--config /config/$(CONFIG).yaml
