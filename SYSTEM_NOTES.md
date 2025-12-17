@@ -17,10 +17,10 @@ Environment and configuration details for this deployment.
 
 | Resource | Allocated |
 |----------|-----------|
-| Total Memory | 3.83 GB |
+| Total Memory | 8 GB (recommended: 6GB+) |
 | CPUs | 8 |
 
-**Note**: The limited memory (3.83 GB) can cause OOM issues when running all services simultaneously. Elasticsearch is particularly memory-hungry.
+**Note**: Allocate at least 6GB to Docker Desktop to prevent Elasticsearch OOM issues.
 
 ## Container Images
 
@@ -90,7 +90,7 @@ Environment and configuration details for this deployment.
 
 2. **Platform Emulation**: x86_64 images run under Rosetta emulation on ARM64, causing performance overhead
 
-3. **Indexing Errors**: Some documents fail to index due to missing required fields (98/900 indexed in demo)
+3. **Indexing**: All 900/900 documents now index successfully (after community_id type fix)
 
 4. **First Build Time**: Initial `make up` takes ~5 minutes to build custom Spark images
 

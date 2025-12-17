@@ -36,6 +36,9 @@ All notable changes to this project are documented here.
   - Changed `tuple[...]` to `Tuple[...]`
   - Reason: Same Python 3.7 compatibility issues
 
+- **apps/api/services/elasticsearch_service.py**: Changed `community_id` mapping from `integer` to `long`
+  - Reason: GraphFrames labelPropagation produces 64-bit community IDs that overflow 32-bit integer
+
 ### Added
 - **infra/spark/Dockerfile**: Custom Spark image with baked dependencies
   - Installs `py3-numpy` via apk (pre-built binary for Alpine)
