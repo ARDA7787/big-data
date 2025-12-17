@@ -102,7 +102,7 @@ class ElasticsearchService:
                     "venue_name": {"type": "text"},
                     "pagerank": {"type": "float"},
                     "citation_count": {"type": "integer"},
-                    "community_id": {"type": "integer"}
+                    "community_id": {"type": "long"}
                 }
             }
         }
