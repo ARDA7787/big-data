@@ -3,7 +3,7 @@
 > Mining Research Papers & Citation Networks at Scale
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Spark 3.5](https://img.shields.io/badge/spark-3.5-orange.svg)](https://spark.apache.org/)
+[![Spark 3.3](https://img.shields.io/badge/spark-3.3-orange.svg)](https://spark.apache.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A unified scholarly knowledge graph platform that ingests data from arXiv, PubMed, and OpenAlex, models it as a citation network, runs scalable analytics, and exposes insights via a polished web dashboard.
@@ -203,6 +203,108 @@ make logs        # View container logs
 make spark-shell # Open interactive Spark shell
 make status      # Check pipeline status
 make clean       # Remove all data and containers
+```
+
+---
+
+## 📋 Grader Runbook (Clean Machine)
+
+This section provides exact commands to run the project from scratch on a clean machine.
+
+### Prerequisites
+
+- **Docker Desktop** (v20.10+) with Docker Compose v2
+- **Make** (GNU Make)
+- **8GB RAM minimum** (16GB recommended)
+- **20GB free disk space**
+
+### Step-by-Step Execution
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/ARDA7787/big-data.git
+cd big-data
+
+# 2. Start all services (builds images on first run, ~5 min)
+make up
+
+# 3. Wait for services to be healthy
+make wait-healthy
+
+# 4. Initialize HDFS directories
+make init-hdfs
+
+# 5. Run data ingestion (~3-5 min, fetches from APIs)
+make ingest CONFIG=demo
+
+# 6. Run Spark ETL (~1-2 min)
+make etl CONFIG=demo
+
+# 7. Run Spark Analytics (~2-3 min)
+make analytics CONFIG=demo
+
+# 8. Index to Elasticsearch (optional)
+make index
+
+# 9. Verify the dashboard
+open http://localhost:3000
+```
+
+### Expected Outputs
+
+| Step | Expected Result |
+|------|-----------------|
+| `make ingest` | 1000 total records (400 arXiv, 300 PubMed, 300 OpenAlex) |
+| `make etl` | 900 unified works, 6500+ authors, 150+ citation edges |
+| `make analytics` | Topic models, PageRank scores, trend data |
+| Dashboard | Interactive charts, search, topic explorer |
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Port 8000/3000/8080 in use | Stop conflicting containers: `docker stop $(docker ps -aq)` |
+| First build slow | Images are built on first run; subsequent runs are fast |
+| Ingestion takes long | API rate limits apply; ~3-5 min is normal for demo mode |
+| Spark job fails | Check logs: `docker logs spark-master` |
+
+### Cleanup
+
+```bash
+# Stop and remove all containers + volumes
+make clean
+
+# Or just stop without removing data
+make down
+```
+
+---
+
+## 📦 Zip Submission Checklist
+
+If submitting as a zip file:
+
+**Include:**
+- All source code (apps/, pipelines/, infra/, configs/)
+- Documentation (README.md, CHANGELOG.md, docs/)
+- Configuration files (Makefile, docker-compose.yml, Dockerfiles)
+
+**Exclude:**
+- `data/` directory (generated data)
+- `node_modules/` (auto-installed)
+- `.next/` (build cache)
+- Docker volumes (recreated on build)
+- `.git/` directory (optional, for smaller zip)
+
+**Create zip:**
+```bash
+zip -r scholarly-kg-submission.zip . \
+  -x "data/*" \
+  -x "*/node_modules/*" \
+  -x "*/.next/*" \
+  -x ".git/*" \
+  -x "*.pyc" \
+  -x "__pycache__/*"
 ```
 
 ---
