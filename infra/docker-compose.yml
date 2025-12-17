@@ -1,0 +1,258 @@
+services:
+  # =============================================================================
+  # HDFS - Hadoop Distributed File System (Pseudo-distributed mode)
+  # =============================================================================
+  hdfs-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-namenode
+    hostname: namenode
+    environment:
+      - CLUSTER_NAME=scholarly-graph
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - HDFS_CONF_dfs_replication=1
+      - HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check=false
+    ports:
+      - "9870:9870"   # NameNode Web UI
+      - "9000:9000"   # HDFS RPC
+    volumes:
+      - hdfs_namenode:/hadoop/dfs/name
+    networks:
+      - scholarly-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  hdfs-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-datanode
+    hostname: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=1
+    ports:
+      - "9864:9864"   # DataNode Web UI
+    volumes:
+      - hdfs_datanode:/hadoop/dfs/data
+    networks:
+      - scholarly-net
+    depends_on:
+      hdfs-namenode:
+        condition: service_healthy
+
+  # =============================================================================
+  # SPARK - Distributed Processing Engine
+  # =============================================================================
+  spark-master:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+      args:
+        SPARK_IMAGE: bde2020/spark-master:3.3.0-hadoop3.3
+    image: scholarly-spark-master:3.3.0
+    container_name: spark-master
+    hostname: spark-master
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "8080:8080"   # Spark Master Web UI
+      - "7077:7077"   # Spark Master RPC
+    volumes:
+      - ../pipelines/spark:/opt/spark-jobs
+      - ../data:/data
+      - spark_logs:/spark/logs
+      - ../configs:/config:ro
+    networks:
+      - scholarly-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  spark-worker-1:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+      args:
+        SPARK_IMAGE: bde2020/spark-worker:3.3.0-hadoop3.3
+    image: scholarly-spark-worker:3.3.0
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_WEBUI_PORT=8081
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "8081:8081"   # Worker Web UI
+    volumes:
+      - ../pipelines/spark:/opt/spark-jobs
+      - ../data:/data
+      - spark_worker_1:/spark/work
+      - ../configs:/config:ro
+    networks:
+      - scholarly-net
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  spark-worker-2:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+      args:
+        SPARK_IMAGE: bde2020/spark-worker:3.3.0-hadoop3.3
+    image: scholarly-spark-worker:3.3.0
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_WEBUI_PORT=8082
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "8082:8082"   # Worker Web UI
+    volumes:
+      - ../pipelines/spark:/opt/spark-jobs
+      - ../data:/data
+      - spark_worker_2:/spark/work
+      - ../configs:/config:ro
+    networks:
+      - scholarly-net
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    profiles:
+      - full  # Only start in full mode
+
+  # =============================================================================
+  # ELASTICSEARCH - Search & Analytics Engine
+  # =============================================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    hostname: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - cluster.name=scholarly-cluster
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"   # Elasticsearch HTTP
+      - "9300:9300"   # Elasticsearch Transport
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - scholarly-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # =============================================================================
+  # BACKEND - FastAPI Application
+  # =============================================================================
+  backend:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    container_name: backend
+    hostname: backend
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - HDFS_NAMENODE=hdfs://namenode:9000
+      - DATA_PATH=/data/processed
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"   # API
+    volumes:
+      - ../apps/api:/app
+      - ../data:/data:ro
+    networks:
+      - scholarly-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # FRONTEND - Next.js Application
+  # =============================================================================
+  frontend:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    container_name: frontend
+    hostname: frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - API_URL=http://backend:8000
+    ports:
+      - "3000:3000"   # Web UI
+    volumes:
+      - ../apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - scholarly-net
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # =============================================================================
+  # INGESTION WORKER - Python Ingestion Jobs
+  # =============================================================================
+  ingestion:
+    build:
+      context: ../pipelines/ingest
+      dockerfile: Dockerfile
+    container_name: ingestion
+    hostname: ingestion
+    environment:
+      - HDFS_NAMENODE=hdfs://namenode:9000
+      - DATA_PATH=/data/raw
+      - CONFIG_PATH=/config
+    volumes:
+      - ../pipelines/ingest:/app
+      - ../data:/data
+      - ../configs:/config:ro
+    networks:
+      - scholarly-net
+    depends_on:
+      hdfs-namenode:
+        condition: service_healthy
+    profiles:
+      - ingestion  # Only run when needed
+
+networks:
+  scholarly-net:
+    driver: bridge
+
+volumes:
+  hdfs_namenode:
+  hdfs_datanode:
+  elasticsearch_data:
+  spark_logs:
+  spark_worker_1:
+  spark_worker_2:
+

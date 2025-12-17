@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  HDFS Site Configuration for Scholarly Knowledge Graph
+  Pseudo-distributed mode for development
+-->
+<configuration>
+    <!-- Replication factor (1 for pseudo-distributed) -->
+    <property>
+        <name>dfs.replication</name>
+        <value>1</value>
+    </property>
+    
+    <!-- NameNode data directory -->
+    <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>file:///hadoop/dfs/name</value>
+    </property>
+    
+    <!-- DataNode data directory -->
+    <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>file:///hadoop/dfs/data</value>
+    </property>
+    
+    <!-- Permissions -->
+    <property>
+        <name>dfs.permissions.enabled</name>
+        <value>false</value>
+    </property>
+    
+    <!-- Block size (128MB default) -->
+    <property>
+        <name>dfs.blocksize</name>
+        <value>134217728</value>
+    </property>
+    
+    <!-- NameNode web UI address -->
+    <property>
+        <name>dfs.namenode.http-address</name>
+        <value>0.0.0.0:9870</value>
+    </property>
+    
+    <!-- DataNode web UI address -->
+    <property>
+        <name>dfs.datanode.http.address</name>
+        <value>0.0.0.0:9864</value>
+    </property>
+    
+    <!-- Hostname check (disabled for Docker) -->
+    <property>
+        <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+        <value>false</value>
+    </property>
+    
+    <!-- Client socket timeout -->
+    <property>
+        <name>dfs.client.socket-timeout</name>
+        <value>60000</value>
+    </property>
+</configuration>
+
