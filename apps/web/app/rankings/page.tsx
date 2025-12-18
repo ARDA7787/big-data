@@ -186,7 +186,6 @@ export default function RankingsPage() {
                   key={paper.work_id} 
                   paper={paper} 
                   rank={index + 1}
-                  onClick={() => setSelectedPaper(paper)}
                   onSave={() => toggleSavedPaper(paper)}
                   isSaved={isSavedPaper(paper.work_id)}
                 />
@@ -199,7 +198,6 @@ export default function RankingsPage() {
                   key={paper.work_id}
                   paper={paper}
                   rank={index + 1}
-                  onClick={() => setSelectedPaper(paper)}
                   onSave={() => toggleSavedPaper(paper)}
                   isSaved={isSavedPaper(paper.work_id)}
                 />
@@ -212,7 +210,6 @@ export default function RankingsPage() {
                   key={paper.work_id}
                   paper={paper}
                   rank={index + 1}
-                  onClick={() => setSelectedPaper(paper)}
                   onSave={() => toggleSavedPaper(paper)}
                   isSaved={isSavedPaper(paper.work_id)}
                 />
@@ -321,12 +318,11 @@ export default function RankingsPage() {
 interface PaperCardProps {
   paper: RankedPaper
   rank: number
-  onClick: () => void
   onSave: () => void
   isSaved: boolean
 }
 
-function PaperCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
+function PaperCard({ paper, rank, onSave, isSaved }: PaperCardProps) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -334,8 +330,7 @@ function PaperCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
       transition={{ delay: rank * 0.02 }}
     >
       <Card 
-        className="flex items-center gap-4 p-4 transition-all hover:shadow-soft-lg cursor-pointer group"
-        onClick={onClick}
+        className="flex items-center gap-4 p-4 transition-all hover:shadow-soft-lg group"
       >
         <div
           className={cn(
@@ -372,7 +367,7 @@ function PaperCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
             </p>
           </div>
           <button
-            onClick={(e) => { e.stopPropagation(); onSave(); }}
+            onClick={onSave}
             className={cn(
               'p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100',
               isSaved
@@ -389,7 +384,7 @@ function PaperCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
   )
 }
 
-function PaperGridCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
+function PaperGridCard({ paper, rank, onSave, isSaved }: PaperCardProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -397,8 +392,7 @@ function PaperGridCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps
       transition={{ delay: rank * 0.02 }}
     >
       <Card 
-        className="p-4 transition-all hover:shadow-soft-lg cursor-pointer h-full flex flex-col"
-        onClick={onClick}
+        className="p-4 transition-all hover:shadow-soft-lg h-full flex flex-col"
       >
         <div className="flex items-start justify-between mb-3">
           <div
@@ -412,7 +406,7 @@ function PaperGridCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps
             {rank}
           </div>
           <button
-            onClick={(e) => { e.stopPropagation(); onSave(); }}
+            onClick={onSave}
             className={cn(
               'p-1.5 rounded-lg transition-colors',
               isSaved
@@ -447,7 +441,7 @@ function PaperGridCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps
   )
 }
 
-function PaperDetailCard({ paper, rank, onClick, onSave, isSaved }: PaperCardProps) {
+function PaperDetailCard({ paper, rank, onSave, isSaved }: PaperCardProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -455,8 +449,7 @@ function PaperDetailCard({ paper, rank, onClick, onSave, isSaved }: PaperCardPro
       transition={{ delay: rank * 0.05 }}
     >
       <Card 
-        className="p-6 transition-all hover:shadow-soft-lg cursor-pointer"
-        onClick={onClick}
+        className="p-6 transition-all hover:shadow-soft-lg"
       >
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -478,7 +471,7 @@ function PaperDetailCard({ paper, rank, onClick, onSave, isSaved }: PaperCardPro
             </div>
           </div>
           <button
-            onClick={(e) => { e.stopPropagation(); onSave(); }}
+            onClick={onSave}
             className={cn(
               'p-2 rounded-lg transition-colors',
               isSaved
@@ -522,12 +515,11 @@ function PaperDetailCard({ paper, rank, onClick, onSave, isSaved }: PaperCardPro
         </div>
         
         <div className="mt-4 flex items-center gap-2">
-          <button className="flex-1 rounded-lg border border-neutral-200 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
+          <button className="flex-1 rounded-lg border border-neutral-200 py-2 text-sm font-medium text-neutral-400 transition-colors" disabled>
             View Details
           </button>
           <a
             href={`/search?q=${encodeURIComponent(paper.title)}`}
-            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-500 hover:bg-neutral-50 transition-colors"
           >
             <Search className="h-4 w-4" />

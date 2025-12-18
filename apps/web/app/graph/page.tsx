@@ -500,13 +500,15 @@ export default function GraphPage() {
       {/* Help Modal */}
       <AnimatePresence>
         {showHelp && (
-          <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          >
             {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-neutral-900/60"
+            <div
+              className="absolute inset-0 bg-neutral-900/70"
               onClick={() => setShowHelp(false)}
             />
             
@@ -515,7 +517,7 @@ export default function GraphPage() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl"
+              className="relative w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl"
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -584,7 +586,7 @@ export default function GraphPage() {
                 </button>
               </div>
             </motion.div>
-          </>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
